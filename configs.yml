@@ -1,0 +1,441 @@
+# ================================
+# AgenticX GraphRAG 演示系统配置文件
+# 基于 AgenticX 核心模块的完整配置
+# 集成 Knowledge、Embeddings、Storage、Retrieval 四大核心模块
+# ================================
+
+# ================================
+# 系统基础配置 (System Configuration)
+# ================================
+system:
+  name: "agenticx_graphrag_demo"
+  version: "1.0.0"
+  description: "基于 AgenticX 的 GraphRAG 演示系统"
+  environment: "development"  # development, staging, production
+  debug: true
+  log_level: "INFO"  # DEBUG, INFO, WARNING, ERROR
+  
+  # 工作目录配置
+  workspace:
+    base_dir: "./workspace"
+    data_dir: "./workspace/data"
+    documents_dir: "./workspace/documents"
+    output_dir: "./workspace/output"
+    cache_dir: "./workspace/cache"
+    logs_dir: "./workspace/logs"
+    temp_dir: "./workspace/temp"
+  
+# ========================================
+# LLM 配置 (分层模型配置)
+# ========================================
+llm:
+  # 默认LLM配置（用于SPO抽取等轻量任务）
+  provider: "bailian"  # openai, anthropic, litellm, bailian
+  model: "qwen3-next-80b-a3b-instruct"  # 轻量快速模型
+  api_key: "${BAILIAN_API_KEY}"
+  base_url: "${BAILIAN_BASE_URL}"
+  temperature: 0.1
+  max_tokens: 2048
+  timeout: 180
+  retry_attempts: 5
+  
+  # 强模型配置（用于文档分析和Schema生成）
+  strong_model:
+    provider: "bailian"
+    model: "qwen3-max"  # 强推理能力模型，128k上下文
+    api_key: "${BAILIAN_API_KEY}"
+    base_url: "${BAILIAN_BASE_URL}"
+    temperature: 0.1    # 低温度确保稳定输出
+    max_tokens: 128000  # 最大上下文长度，充分利用
+    timeout: 600        # 增加超时时间，处理大文档
+    retry_attempts: 3
+    # 针对Schema生成优化的参数
+    top_p: 0.8          # 适度的多样性
+    frequency_penalty: 0.1  # 减少重复
+    
+  # 轻量模型配置（用于SPO抽取）
+  light_model:
+    provider: "bailian"
+    model: "qwen3-235b-a22b"  # 快速模型
+    api_key: "${BAILIAN_API_KEY}"
+    base_url: "${BAILIAN_BASE_URL}"
+    temperature: 0.1
+    max_tokens: 4096
+    timeout: 120
+    retry_attempts: 5
+  
+# ========================================
+# Knowledge 模块配置
+# ========================================
+knowledge:
+  # 文档处理配置
+  document_processor:
+    backend: "structured"  # simple_text, structured, vlm_layout
+    complexity_level: "medium"  # low, medium, high
+    enable_ocr: false
+    enable_table_extraction: true
+    enable_image_analysis: false
+    
+  # 文档读取器配置
+  readers:
+    pdf:
+      enabled: true
+      extract_images: false
+      extract_tables: true
+      page_range: null  # [1, 10] 或 null 表示全部页面
+    text:
+      enabled: true
+      encoding: "utf-8"
+    json:
+      enabled: true
+      flatten_nested: true
+    csv:
+      enabled: true
+      delimiter: ","
+      header_row: true
+      
+  # 智能分块配置
+  chunking:
+    strategy: "fixed_size"  # 改为固定大小分块，避免语义分块的复杂性
+    chunk_size: 4000     # 大幅增大分块，目标是减少到500块以内
+    chunk_overlap: 400   # 保持10%重叠
+    min_chunk_size: 2000 # 大幅提高最小块大小
+    max_chunk_size: 6000 # 大幅增大最大分块
+    
+    # 语义分块特定配置（备用）
+    semantic:
+      similarity_threshold: 0.6   # 进一步降低阈值
+      min_sentences_per_chunk: 10 # 大幅增加最小句子数
+      max_sentences_per_chunk: 50 # 大幅增加最大句子数
+      
+    # Agentic 分块特定配置
+    agentic:
+      enable_quality_assessment: true
+      enable_adaptive_sizing: true
+      context_window: 2048
+      
+  # GraphRAG 构建配置
+  graphrag:
+    # 抽取方法配置
+    extraction_method: "spo"  # "spo" (两阶段抽取) 或 "separate" (分离抽取)
+    schema_path: "schema.json"  # 基础Schema文件路径
+    enable_custom_schema: true  # 启用定制Schema生成
+    prompts_dir: "prompts"  # 提示词文件夹路径
+    spo_batch_size: 40  # 最大化批处理大小，与performance配置保持一致
+    
+    # 实体提取配置
+    entity_extraction:
+      max_entities_per_chunk: 40  # 增加每块最大实体数
+      entity_types:
+        - "PERSON"
+        - "ORGANIZATION"
+        - "LOCATION"
+        - "CONCEPT"
+        - "EVENT"
+        - "TECHNOLOGY"
+        - "PRODUCT"
+        - "METHOD"      # 新增：方法/算法
+        - "FRAMEWORK"   # 新增：框架
+        - "COMPONENT"   # 新增：组件
+      confidence_threshold: 0.6  # 降低阈值，提取更多实体
+      enable_coreference_resolution: true
+      
+    # 关系提取配置
+    relationship_extraction:
+      max_relationships_per_chunk: 60  # 增加每块最大关系数
+      relationship_types:
+        - "RELATED_TO"
+        - "PART_OF"
+        - "LOCATED_IN"
+        - "WORKS_FOR"
+        - "CREATED_BY"
+        - "INFLUENCES"
+        - "DEPENDS_ON"
+        - "IMPLEMENTS"  # 新增：实现关系
+        - "USES"        # 新增：使用关系
+        - "CONTAINS"    # 新增：包含关系
+      confidence_threshold: 0.5  # 降低阈值，提取更多关系
+      enable_bidirectional: true
+      
+    # 社区检测配置
+    community_detection:
+      algorithm: "leiden"  # leiden, louvain, label_propagation
+      resolution: 1.0
+      max_communities: 100
+      min_community_size: 3
+      enable_hierarchical: true
+      
+    # 图优化配置
+    graph_optimization:
+      enable_entity_merging: true
+      entity_similarity_threshold: 0.9
+      enable_relationship_pruning: true
+      relationship_weight_threshold: 0.3
+      enable_noise_reduction: true
+      
+    # 质量验证配置
+    quality_validation:
+      min_entity_confidence: 0.5
+      min_relationship_confidence: 0.4
+      max_orphaned_entities_ratio: 0.1
+      enable_consistency_check: true
+      
+# ========================================
+# Embeddings 模块配置
+# ========================================
+embeddings:
+  # 嵌入路由器配置
+  router:
+    primary_provider: "bailian"  # 使用百炼作为主要提供商
+    fallback_providers: ["siliconflow", "openai"]  # 备用提供商
+    load_balancing: false
+    health_check_interval: 300  # 秒
+    
+  # OpenAI 嵌入配置
+  openai:
+    model: "text-embedding-3-small"
+    api_key: "${OPENAI_API_KEY}"
+    # base_url: ""  # 使用默认URL，注释掉null值
+    dimensions: 1024  # 统一为1024维度
+    batch_size: 100
+    timeout: 30
+    
+  # SiliconFlow 嵌入配置
+  siliconflow:
+    model: "BAAI/bge-m3"
+    api_key: "${SILICONFLOW_API_KEY}"
+    base_url: "https://api.siliconflow.cn/v1"
+    dimensions: 1024  # 保持1024维度
+    batch_size: 10  # 修复：降低批处理大小以避免API限制
+    
+  # 百炼嵌入配置
+  # text-embedding-v4：通用向量，是通义实验室基于Qwen系列基座的多语言文本/多模态统一向量模型，面向全球多个主流语种，提供高水准的向量服务，帮助开发者将文本/图片/视频数据快速转换为高质量的向量数据，在文本、图片检索、聚类、分类性能大幅提升，支持64~2048维用户自定义向量维度。
+  bailian:
+    model: "text-embedding-v4"
+    api_key: "${BAILIAN_API_KEY}"
+    base_url: "${BAILIAN_BASE_URL}"
+    dimensions: 1024  # 百炼支持1024维度，统一设置
+    batch_size: 10    # 修复：百炼API批处理大小限制为10
+    
+# ========================================
+# Storage 模块配置
+# ========================================
+storage:
+  # 向量存储配置
+  vector:
+    provider: "milvus"  # chroma, milvus, qdrant, faiss, pgvector, weaviate, pinecone
+    
+    # Chroma 配置 (本地开发推荐)
+    chroma:
+      host: "localhost"
+      port: 8000
+      collection_name: "agenticx_graphrag"
+      persist_directory: "./storage/chroma"
+      distance_metric: "cosine"  # cosine, l2, ip
+      
+    # Milvus 配置 (生产环境推荐)
+    milvus:
+      host: "localhost"
+      port: 19530
+      collection_name: "agenticx_graphrag"
+      database: "default"
+      # username: ""  # 注释掉null值
+      # password: ""  # 注释掉null值
+      secure: false
+      
+    # Qdrant 配置
+    qdrant:
+      host: "localhost"
+      port: 6333
+      collection_name: "agenticx_graphrag"
+      # api_key: ""  # 本地部署不需要API key
+      prefer_grpc: false
+      
+  # 图存储配置
+  graph:
+    provider: "neo4j"  # neo4j, nebula, arangodb
+    
+    # Neo4j 配置
+    neo4j:
+      uri: "${NEO4J_URI}"
+      username: "${NEO4J_USERNAME}"
+      password: "${NEO4J_PASSWORD}"
+      database: "neo4j"
+      max_connection_lifetime: 3600
+      max_connection_pool_size: 50
+      connection_acquisition_timeout: 60
+      
+    # Nebula Graph 配置
+    nebula:
+      hosts: ["127.0.0.1:9669"]
+      username: "root"
+      password: "nebula"
+      space_name: "agenticx_graphrag"
+      
+  # 键值存储配置
+  key_value:
+    provider: "redis"  # redis, sqlite, memory
+    
+    # Redis 配置
+    redis:
+      host: "${REDIS_HOST}"
+      port: "${REDIS_PORT}"
+      password: "${REDIS_PASSWORD}"
+      db: 0
+      max_connections: 20
+      
+    # SQLite 配置
+    sqlite:
+      database_path: "./storage/cache.db"
+      
+# ========================================
+# Retrieval 模块配置
+# ========================================
+retrieval:
+  # 混合检索配置
+  hybrid:
+    vector_weight: 0.6
+    bm25_weight: 0.4
+    deduplication_threshold: 0.8
+    min_combined_score: 0.1
+    
+  # 向量检索配置
+  vector:
+    similarity_metric: "cosine"  # cosine, euclidean, dot_product
+    top_k: 20
+    similarity_threshold: 0.7
+    enable_mmr: true  # Maximum Marginal Relevance
+    mmr_diversity_bias: 0.3
+    
+  # 图检索配置
+  graph:
+    max_depth: 3
+    max_nodes: 50
+    relationship_weights: true
+    enable_path_ranking: true
+    community_aware: true
+    
+  # BM25 检索配置
+  bm25:
+    k1: 1.2
+    b: 0.75
+    top_k: 20
+    
+  # 自动检索配置
+  auto:
+    query_analysis_enabled: true
+    strategy_selection_model: "gpt-4o-mini"
+    confidence_threshold: 0.8
+    fallback_strategy: "hybrid"
+    
+  # 重排序配置
+  reranker:
+    provider: "cross_encoder"  # cross_encoder, llm_reranker, cohere
+    model: "cross-encoder/ms-marco-MiniLM-L-6-v2"
+    top_k: 10
+    batch_size: 32
+    
+  # 查询分析配置
+  query_analysis:
+    enable_intent_detection: true
+    enable_entity_extraction: true
+    enable_query_expansion: true
+    expansion_terms: 3
+    
+# ========================================
+# RAG 工作流配置
+# ========================================
+rag:
+  # 文档索引配置
+  indexing:
+    batch_size: 100
+    enable_incremental: true
+    duplicate_detection: true
+    quality_filtering: true
+    
+  # 检索配置
+  retrieval:
+    default_top_k: 10
+    max_context_length: 8000
+    enable_context_compression: true
+    compression_ratio: 0.7
+    
+  # 生成配置
+  generation:
+    model: "gpt-4o-mini"
+    max_tokens: 2048
+    temperature: 0.1
+    enable_citation: true
+    citation_format: "numbered"  # numbered, inline, footnote
+    
+# ========================================
+# 性能优化配置
+# ========================================
+performance:
+  # 缓存配置
+  caching:
+    enable_query_cache: true
+    enable_embedding_cache: true
+    enable_result_cache: true
+    cache_ttl: 3600  # 秒
+    max_cache_size: 1000
+    
+  # 并发配置
+  concurrency:
+    max_workers: 8        # 增加并发工作线程
+    batch_processing: true
+    async_operations: true
+    spo_batch_size: 40    # SPO抽取批处理大小，与graphrag配置保持一致
+    embedding_batch_size: 40  # 嵌入批处理大小
+    
+  # 内存管理
+  memory:
+    max_memory_usage: "2GB"
+    enable_memory_monitoring: true
+    garbage_collection_interval: 300
+    
+# ========================================
+# 监控和日志配置
+# ========================================
+monitoring:
+  # 日志配置
+  logging:
+    level: "INFO"
+    format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+    file_path: "./workspace/logs/agenticx_graphrag.log"
+    max_file_size: "10MB"
+    backup_count: 5
+    
+  # 指标收集
+  metrics:
+    enable_performance_metrics: true
+    enable_quality_metrics: true
+    metrics_export_interval: 60
+    
+  # 健康检查
+  health_check:
+    enable_service_health_check: true
+    check_interval: 30
+    timeout: 10
+    
+# ========================================
+# 开发和调试配置
+# ========================================
+development:
+  # 调试配置
+  debug:
+    enable_verbose_logging: true
+    enable_query_tracing: true
+    enable_performance_profiling: false
+    
+  # 测试配置
+  testing:
+    enable_test_mode: false
+    mock_external_services: false
+    test_data_path: "./test_data"
+    
+  # 实验性功能
+  experimental:
+    enable_advanced_chunking: false
+    enable_multimodal_processing: false
+    enable_real_time_updates: false

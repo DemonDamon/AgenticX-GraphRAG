@@ -1,0 +1,103 @@
+# Schema生成提示词配置
+
+name: "schema_generation"
+description: "分析文档内容，生成定制化的知识图谱Schema"
+version: "1.0"
+
+# 主要模板
+template: |
+  你是知识图谱Schema设计专家。请分析以下文档内容，基于基础Schema生成一个定制化的Schema，用于后续的知识抽取。
+
+  基础Schema：
+  ```json
+  {base_schema}
+  ```
+
+  文档内容概览：
+  ```
+  {document_summary}
+  ```
+
+  文档类别：{document_category}
+  文档标签：{document_tags}
+
+  任务要求：
+  1. 分析文档的主要内容领域和特点
+  2. 基于基础Schema，扩展适合该文档的实体类型、关系类型和属性类型
+  3. 保留基础Schema中的通用类型
+  4. 添加文档特定的专业类型
+  5. 确保新增类型与文档内容高度相关
+
+  输出格式：
+  ```json
+  {{
+    "Nodes": [
+      "基础实体类型...",
+      "文档特定实体类型..."
+    ],
+    "Relations": [
+      "基础关系类型...", 
+      "文档特定关系类型..."
+    ],
+    "Attributes": [
+      "基础属性类型...",
+      "文档特定属性类型..."
+    ],
+    "domain_info": {{
+      "primary_domain": "主要领域",
+      "sub_domains": ["子领域1", "子领域2"],
+      "key_concepts": ["核心概念1", "核心概念2"],
+      "reasoning": "Schema设计理由"
+    }}
+  }}
+  ```
+
+  只返回JSON，无其他内容。
+
+# 简化模板（用于较短文档）
+simple_template: |
+  分析文档内容，基于基础Schema生成定制Schema：
+
+  基础Schema：{base_schema}
+  文档内容：{document_content}
+
+  要求：
+  1. 保留基础类型
+  2. 添加文档特定类型
+  3. 确保类型相关性
+
+  输出JSON格式：
+  {{
+    "Nodes": ["实体类型..."],
+    "Relations": ["关系类型..."], 
+    "Attributes": ["属性类型..."]
+  }}
+
+# 配置参数
+config:
+  max_document_length: 3000  # 文档摘要最大长度
+  min_confidence_threshold: 0.8  # 新类型添加的最小置信度
+  max_new_types_per_category: 10  # 每个类别最多新增类型数
+  
+# 示例输出
+example_output: |
+  {
+    "Nodes": [
+      "person", "organization", "location", "concept",
+      "software", "algorithm", "dataset", "research_paper"
+    ],
+    "Relations": [
+      "related_to", "part_of", "works_for", "located_in",
+      "implements", "uses", "cites", "improves"
+    ],
+    "Attributes": [
+      "name", "description", "type", "date",
+      "version", "accuracy", "complexity", "license"
+    ],
+    "domain_info": {
+      "primary_domain": "机器学习",
+      "sub_domains": ["深度学习", "自然语言处理"],
+      "key_concepts": ["神经网络", "训练数据", "模型优化"],
+      "reasoning": "文档主要讨论机器学习算法和应用，需要专门的技术实体和关系类型"
+    }
+  }

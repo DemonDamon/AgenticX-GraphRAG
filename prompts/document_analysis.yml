@@ -1,0 +1,87 @@
+# 文档分析提示词配置
+
+name: "document_analysis"
+description: "分析文档内容，生成摘要、分类和标签"
+version: "1.0"
+
+# 主要模板
+template: |
+  你是文档分析专家。请分析以下文档内容，生成文档摘要、分类和标签信息。
+
+  文档内容：
+  ```
+  {document_content}
+  ```
+
+  分析要求：
+  1. **内容摘要**：提取文档的核心内容和主要观点（200字以内）
+  2. **文档分类**：确定文档的主要类别（如：技术文档、商业报告、学术论文、新闻资讯等）
+  3. **领域标签**：识别文档涉及的专业领域和子领域
+  4. **关键概念**：提取文档中的核心概念和术语
+  5. **实体预览**：预估文档中可能包含的主要实体类型
+
+  输出格式：
+  ```json
+  {{
+    "summary": "文档核心内容摘要",
+    "category": "文档主要类别",
+    "domain": "主要专业领域",
+    "sub_domains": ["子领域1", "子领域2"],
+    "tags": ["标签1", "标签2", "标签3"],
+    "key_concepts": ["核心概念1", "核心概念2"],
+    "potential_entity_types": ["可能的实体类型1", "可能的实体类型2"],
+    "potential_relation_types": ["可能的关系类型1", "可能的关系类型2"],
+    "complexity_level": "文档复杂度（简单/中等/复杂）",
+    "language": "文档语言",
+    "estimated_entities": "预估实体数量范围"
+  }}
+  ```
+
+  只返回JSON，无其他内容。
+
+# 快速分析模板（用于较短文档）
+quick_template: |
+  快速分析文档：
+
+  内容：{document_content}
+
+  输出：
+  {{
+    "summary": "摘要",
+    "category": "类别", 
+    "domain": "领域",
+    "tags": ["标签"],
+    "key_concepts": ["概念"]
+  }}
+
+# 配置参数
+config:
+  max_content_length: 5000  # 最大分析内容长度
+  summary_max_length: 200   # 摘要最大长度
+  max_tags: 10              # 最大标签数
+  max_concepts: 15          # 最大概念数
+
+# 领域分类映射
+domain_mapping:
+  technology: ["技术", "软件", "编程", "算法", "系统", "网络", "数据库", "AI", "机器学习"]
+  business: ["商业", "管理", "市场", "销售", "财务", "战略", "运营", "企业"]
+  academic: ["学术", "研究", "论文", "理论", "实验", "分析", "方法", "科学"]
+  news: ["新闻", "报道", "事件", "政治", "社会", "经济", "国际", "时事"]
+  legal: ["法律", "法规", "条例", "合同", "诉讼", "判决", "权利", "义务"]
+  medical: ["医学", "健康", "疾病", "治疗", "药物", "诊断", "症状", "医院"]
+
+# 示例输出
+example_output: |
+  {
+    "summary": "本文档介绍了基于Transformer架构的大语言模型训练方法，包括数据预处理、模型架构设计、训练策略和评估指标。",
+    "category": "技术文档",
+    "domain": "人工智能",
+    "sub_domains": ["机器学习", "自然语言处理", "深度学习"],
+    "tags": ["Transformer", "大语言模型", "训练", "NLP", "深度学习"],
+    "key_concepts": ["注意力机制", "预训练", "微调", "Token化", "损失函数"],
+    "potential_entity_types": ["algorithm", "model", "dataset", "researcher", "organization"],
+    "potential_relation_types": ["implements", "trains", "evaluates", "improves", "based_on"],
+    "complexity_level": "复杂",
+    "language": "中文",
+    "estimated_entities": "20-50个"
+  }

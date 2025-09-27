@@ -1,0 +1,150 @@
+# SPO抽取提示词配置
+
+name: "spo_extraction"
+description: "基于定制Schema进行SPO三元组抽取"
+version: "1.0"
+
+# 主要模板
+template: |
+  你是专业的知识图谱构建专家。请基于定制Schema分析文本，抽取尽可能多的有价值实体、属性和关系，以结构化JSON格式返回。
+
+  定制Schema：
+  ```json
+  {custom_schema}
+  ```
+
+  领域信息：
+  - 主要领域：{primary_domain}
+  - 核心概念：{key_concepts}
+
+  文本内容：
+  ```
+  {text}
+  ```
+
+  抽取指导：
+  1. **优先使用定制Schema**：严格按照上述Schema中的类型进行抽取
+  2. **完整性**：不遗漏文本中的重要信息
+  3. **准确性**：确保抽取的实体和关系准确无误
+  4. **简洁性**：避免冗余和重复信息
+  5. **一致性**：实体名称在整个抽取过程中保持一致
+
+  输出格式：
+  ```json
+  {{
+    "attributes": {{
+      "实体名称": ["属性1: 值1", "属性2: 值2"]
+    }},
+    "triples": [
+      ["实体1", "关系", "实体2"]
+    ],
+    "entity_types": {{
+      "实体名称": "实体类型"
+    }}
+  }}
+  ```
+
+  只返回JSON，无其他内容。
+
+# 简化模板（用于较短文本）
+simple_template: |
+  基于Schema抽取SPO三元组：
+
+  Schema：{custom_schema}
+  文本：{text}
+
+  输出JSON：
+  {{
+    "attributes": {{"实体": ["属性"]}},
+    "triples": [["实体1", "关系", "实体2"]],
+    "entity_types": {{"实体": "类型"}}
+  }}
+
+# 领域特定模板
+domain_templates:
+  # 技术文档
+  technology:
+    template: |
+      你是技术文档知识抽取专家。请从技术文档中抽取技术实体、技术关系和技术属性。
+
+      定制Schema：{custom_schema}
+      文本：{text}
+
+      重点关注：
+      - 技术组件、工具、框架
+      - 技术依赖关系、实现关系
+      - 版本、性能、配置等技术属性
+
+      输出JSON格式：
+      {{
+        "attributes": {{"技术实体": ["技术属性"]}},
+        "triples": [["技术实体1", "技术关系", "技术实体2"]],
+        "entity_types": {{"技术实体": "技术类型"}}
+      }}
+
+  # 商业文档  
+  business:
+    template: |
+      你是商业文档知识抽取专家。请从商业文档中抽取商业实体、商业关系和商业属性。
+
+      定制Schema：{custom_schema}
+      文本：{text}
+
+      重点关注：
+      - 公司、部门、人员、产品
+      - 管理关系、合作关系、竞争关系
+      - 业绩、规模、市场等商业属性
+
+      输出JSON格式：
+      {{
+        "attributes": {{"商业实体": ["商业属性"]}},
+        "triples": [["商业实体1", "商业关系", "商业实体2"]],
+        "entity_types": {{"商业实体": "商业类型"}}
+      }}
+
+  # 学术文档
+  academic:
+    template: |
+      你是学术文档知识抽取专家。请从学术文档中抽取学术实体、学术关系和学术属性。
+
+      定制Schema：{custom_schema}
+      文本：{text}
+
+      重点关注：
+      - 研究者、机构、论文、理论
+      - 引用关系、合作关系、发展关系
+      - 发表时间、影响因子、研究领域等学术属性
+
+      输出JSON格式：
+      {{
+        "attributes": {{"学术实体": ["学术属性"]}},
+        "triples": [["学术实体1", "学术关系", "学术实体2"]],
+        "entity_types": {{"学术实体": "学术类型"}}
+      }}
+
+# 配置参数
+config:
+  max_text_length: 2000  # 最大文本长度
+  max_entities_per_chunk: 30  # 每个文本块最大实体数
+  confidence_threshold: 0.7  # 置信度阈值
+  enable_domain_adaptation: true  # 启用领域自适应
+
+# 示例输出
+example_output: |
+  {
+    "attributes": {
+      "PyTorch": ["类型: 深度学习框架", "开发者: Meta", "许可证: BSD"],
+      "神经网络": ["类型: 机器学习模型", "复杂度: 高", "应用: 图像识别"]
+    },
+    "triples": [
+      ["PyTorch", "supports", "神经网络"],
+      ["神经网络", "used_for", "图像识别"],
+      ["Meta", "develops", "PyTorch"]
+    ],
+    "entity_types": {
+      "PyTorch": "technology",
+      "神经网络": "concept", 
+      "图像识别": "concept",
+      "Meta": "organization"
+    }
+  }

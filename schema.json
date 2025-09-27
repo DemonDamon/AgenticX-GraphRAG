@@ -1,0 +1,44 @@
+{
+  "Nodes": [
+    "person",
+    "organization", 
+    "location",
+    "event",
+    "concept",
+    "technology",
+    "product",
+    "time_period",
+    "creative_work",
+    "biological_entity",
+    "natural_phenomenon"
+  ],
+  "Relations": [
+    "related_to",
+    "part_of", 
+    "located_in",
+    "works_for",
+    "created_by",
+    "influences",
+    "depends_on",
+    "participates_in",
+    "belongs_to",
+    "precedes",
+    "comparable_to",
+    "uses",
+    "manages"
+  ],
+  "Attributes": [
+    "name",
+    "description", 
+    "type",
+    "status",
+    "date",
+    "location",
+    "profession",
+    "title",
+    "size",
+    "value",
+    "duration",
+    "confidence"
+  ]
+}
