@@ -31,7 +31,7 @@ system:
 llm:
   # 默认LLM配置（用于SPO抽取等轻量任务）
   provider: "bailian"  # openai, anthropic, litellm, bailian
-  model: "qwen3-next-80b-a3b-instruct"  # 轻量快速模型
+  model: "qwen3-30b-a3b-instruct-2507"  # 原始：qwen3-next-80b-a3b-instruct
   api_key: "${BAILIAN_API_KEY}"
   base_url: "${BAILIAN_BASE_URL}"
   temperature: 0.1
@@ -94,34 +94,40 @@ knowledge:
       delimiter: ","
       header_row: true
       
-  # 智能分块配置
+  # 分块配置 - 按用途分离
   chunking:
-    strategy: "fixed_size"  # 改为固定大小分块，避免语义分块的复杂性
-    chunk_size: 4000     # 大幅增大分块，目标是减少到500块以内
-    chunk_overlap: 400   # 保持10%重叠
-    min_chunk_size: 2000 # 大幅提高最小块大小
-    max_chunk_size: 6000 # 大幅增大最大分块
+    # 知识图谱专用分块配置 - 用于知识图谱构建
+    graph_knowledge:
+      strategy: "fixed_size"  # 固定大小分块，稳定可靠
+      chunk_size: 3000       # 适中大小，平衡上下文和处理效率
+      chunk_overlap: 300     # 10%重叠，保持连续性
+      min_chunk_size: 1500   # 确保足够的上下文
+      max_chunk_size: 5000   # 避免过长影响抽取质量
     
-    # 语义分块特定配置（备用）
-    semantic:
-      similarity_threshold: 0.6   # 进一步降低阈值
-      min_sentences_per_chunk: 10 # 大幅增加最小句子数
-      max_sentences_per_chunk: 50 # 大幅增加最大句子数
+    # 向量检索专用分块配置 - 用于语义检索
+    vector:
+      strategy: "fixed_size"  # 固定大小，平衡检索精度
+      chunk_size: 1500       # 优化：充分利用模型能力(~1000 tokens)
+      chunk_overlap: 250     # 适度重叠
+      min_chunk_size: 1000   # 保证最小语义单元
+      max_chunk_size: 2200   # 上限约1500 tokens，安全范围内
       
-    # Agentic 分块特定配置
-    agentic:
-      enable_quality_assessment: true
-      enable_adaptive_sizing: true
-      context_window: 2048
+    # BM25检索专用分块配置 - 用于关键词检索  
+    bm25:
+      strategy: "fixed_size"  # 固定大小，提高召回率
+      chunk_size: 600        # 小块，提高关键词密度
+      chunk_overlap: 100     # 小重叠，避免冗余
+      min_chunk_size: 400    # 保证最小关键词覆盖
+      max_chunk_size: 1000   # 避免关键词稀释
       
-  # GraphRAG 构建配置
-  graphrag:
+  # 知识图谱构建配置
+  graph_knowledge:
     # 抽取方法配置
     extraction_method: "spo"  # "spo" (两阶段抽取) 或 "separate" (分离抽取)
     schema_path: "schema.json"  # 基础Schema文件路径
     enable_custom_schema: true  # 启用定制Schema生成
     prompts_dir: "prompts"  # 提示词文件夹路径
-    spo_batch_size: 40  # 最大化批处理大小，与performance配置保持一致
+    spo_batch_size: 40  # 使用单个处理避免网络连接问题
     
     # 实体提取配置
     entity_extraction:
@@ -186,8 +192,8 @@ knowledge:
 embeddings:
   # 嵌入路由器配置
   router:
-    primary_provider: "bailian"  # 使用百炼作为主要提供商
-    fallback_providers: ["siliconflow", "openai"]  # 备用提供商
+    primary_provider: "bailian"
+    fallback_providers: ["bailian"]
     load_balancing: false
     health_check_interval: 300  # 秒
     
@@ -237,7 +243,8 @@ storage:
     milvus:
       host: "localhost"
       port: 19530
-      collection_name: "agenticx_graphrag"
+      collection_name: "agenticx_documents"  # 🔧 文档向量专用集合
+      graph_collection_name: "agenticx_graph"  # 🔧 图向量专用集合
       database: "default"
       # username: ""  # 注释掉null值
       # password: ""  # 注释掉null值
@@ -303,7 +310,7 @@ retrieval:
   vector:
     similarity_metric: "cosine"  # cosine, euclidean, dot_product
     top_k: 20
-    similarity_threshold: 0.7
+    similarity_threshold: 0.2  # 提高阈值，过滤低质量结果
     enable_mmr: true  # Maximum Marginal Relevance
     mmr_diversity_bias: 0.3
     
@@ -355,7 +362,7 @@ rag:
     
   # 检索配置
   retrieval:
-    default_top_k: 10
+    default_top_k: 100
     max_context_length: 8000
     enable_context_compression: true
     compression_ratio: 0.7
@@ -385,7 +392,7 @@ performance:
     max_workers: 8        # 增加并发工作线程
     batch_processing: true
     async_operations: true
-    spo_batch_size: 40    # SPO抽取批处理大小，与graphrag配置保持一致
+    spo_batch_size: 1    # SPO抽取批处理大小，使用单个处理避免网络问题
     embedding_batch_size: 40  # 嵌入批处理大小
     
   # 内存管理
