@@ -1,0 +1,124 @@
+# 多跳复杂推理问答对数据集构建提示词配置
+
+name: "multihop_dataset_generation"
+description: "领域通用的多跳复杂推理问答对数据集构建指令"
+version: "2.0"
+
+# 主要模板 - 领域通用、结构化、分步骤的数据集构建指令
+template: |
+  你将基于提供的多篇文档内容，生成{sample_nums}个高质量多跳复杂推理问题及答案对，用于测试GraphRAG系统。请严格遵守以下指令。
+
+  ## 🎯 总体目标
+  生成{sample_nums}个**{target_language}多跳复杂推理问题（query）**，每个问题需满足：
+  - 至少**跨{min_documents_per_question}篇文档**推理（多跳）
+  - 不能提及"文档X"或文件名
+  - 必须基于**文档实际内容**，禁止虚构/幻觉
+  - 输出为**JSON数组格式**
+
+  ## 📋 输出格式（严格遵循）
+  ```json
+  [
+    {{
+      "query": "这里是用户提问的自然语言{target_language}问题",
+      "from_docs": ["xxx.pdf", "yyy.pdf"],
+      "expected_output": "这里是标准简明答案，必须基于文档内容",
+      "criteria_clarify": "这里是0-5分评分解释：5=答案完全正确、多跳明确、无幻觉；4=正确但跳数模糊；3=部分正确；2=有错误；1=完全错误；0=虚构或无依据"
+    }}
+  ]
+  ```
+
+  ## 🔧 问题设计指引
+
+  ### Step 1. 主题识别与组合
+  {domain_guidance}
+
+  ### Step 2. 多跳推理模式
+  问题中必须包含**推理跳转逻辑**，使用以下句式模板：
+  - "如何比较A和B在{comparison_aspect}上的设计差异？"
+  - "A的{mechanism_name}是否可用于改进B的{target_aspect}？"
+  - "从A的{perspective}角度分析B的可行性"
+  - "C和D的共性/差异在应对{challenge}时表现如何？"
+  - "解释为什么{approach_a}有效，而{approach_b}在类似任务中未采用？"
+  - "{reasoning_pattern}"
+
+  ### Step 3. 答案设计要求
+  答案必须：
+  - 从文档提取，**不能编造数据**
+  - 包含**具体{domain_specific_terms}**
+  - 若涉及数字/结果，必须引用**文档中的实验数据**
+  - 控制在**{max_answer_sentences}句以内**，简洁清晰
+
+  ### Step 4. from_docs填写规则
+  列出本问题涉及的文档文件名（必须真实存在）
+
+  ### Step 5. criteria_clarify评分解释
+  用0–5分，说明为什么这个答案值得这个分数：
+  - 5分：答案准确引用多篇文档内容，完成跨主题多跳推理，无幻觉，结构清晰
+  - 4分：内容正确但未明确跳点或引用模糊
+  - 3分：部分正确，遗漏关键文档或技术细节
+  - 2分：存在事实错误或过度引申
+  - 1分：答案错误或无依据
+  - 0分：完全虚构，或未基于文档
+
+  ## ❌ 禁止行为
+  - 不要提及"根据文档1…"、"在第二篇中…"等
+  - 不要输出非{target_language}内容（query必须{target_language}，expected_output可含{allowed_terms}）
+  - 不要输出Markdown、注释、说明文字
+  - 不要少于或多于{sample_nums}个问题
+  - 不要复制粘贴大段原文，必须摘要重写
+  - 不要使用模糊词如"可能"、"大概"，除非原文如此
+
+  ## 📄 待分析文档内容：
+  {documents}
+
+  ## 🚀 开始生成
+  现在，请基于上述指令和提供的文档内容，生成{sample_nums}个符合要求的问题/答案对，并以JSON数组格式输出。不需要任何额外解释，直接输出JSON。
+
+# 配置参数
+config:
+  sample_nums: 20  # 生成问题数量
+  min_documents_per_question: 2  # 每个问题最少涉及文档数
+  max_answer_length: 300  # 答案最大长度（字符）
+  max_answer_sentences: 3  # 答案最大句数
+  target_language: "中文"  # 目标语言
+  allowed_terms: "英文术语"  # 答案中允许的其他语言术语
+  
+# 提示变量定义（使用时需要填充的变量）
+variables:
+  # 领域指导 - 根据具体领域定制
+  domain_guidance: |
+    请根据文档内容自动识别主要主题和概念，然后选择两个不同主题进行组合，生成跨文档多跳问题。
+    注意识别文档中的核心概念、方法、系统或理论，并寻找它们之间的潜在关联。
+  
+  # 比较维度 - 可根据领域调整
+  comparison_aspect: "设计理念/技术架构/性能表现/应用场景"
+  
+  # 机制名称 - 领域通用占位符
+  mechanism_name: "核心机制/算法/方法"
+  
+  # 目标方面 - 可定制的改进目标
+  target_aspect: "性能/效率/准确性/稳定性"
+  
+  # 分析视角 - 多角度分析
+  perspective: "技术实现/理论基础/实验验证/应用效果"
+  
+  # 挑战场景 - 通用挑战描述
+  challenge: "复杂场景/性能要求/技术限制"
+  
+  # 方法对比 - 通用方法占位符
+  approach_a: "方法A/系统A/策略A"
+  approach_b: "方法B/系统B/策略B"
+  
+  # 推理模式 - 自定义推理句式
+  reasoning_pattern: "基于{context}，分析{target}的{aspect}如何影响{outcome}？"
+  
+  # 领域特定术语 - 根据领域定制
+  domain_specific_terms: "技术名称、指标、模块名称、专业术语"
+
+# 质量控制
+quality_control:
+  require_specific_terms: true  # 要求包含具体技术术语
+  require_quantitative_data: true  # 要求包含定量数据
+  prohibit_hallucination: true  # 禁止幻觉内容
+  require_clear_reasoning: true  # 要求清晰的推理链
+  cross_document_validation: true  # 验证跨文档引用的准确性
