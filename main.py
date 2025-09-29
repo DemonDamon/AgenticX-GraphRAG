@@ -427,23 +427,25 @@ class AgenticXGraphRAGDemo:
         
         retrieval_config = self.config['retrieval']
         
-        # 🔧 为文档检索创建独立的Milvus存储实例
-        from agenticx.storage.vectordb_storages.milvus import MilvusStorage
-        storage_config = self.config['storage']['vector']['milvus']
-        document_retrieval_storage = MilvusStorage(
-            dimension=1024,  # 使用嵌入维度
-            host=storage_config['host'],
-            port=storage_config['port'],
-            collection_name=storage_config['collection_name'],  # 使用文档专用集合名
-            database=storage_config.get('database', 'default'),
-            username=storage_config.get('username'),
-            password=storage_config.get('password')
-        )
+        # 🔧 确保文档向量存储实例存在，如果不存在则创建
+        if not hasattr(self, '_document_vector_storage') or not self._document_vector_storage:
+            from agenticx.storage.vectordb_storages.milvus import MilvusStorage
+            storage_config = self.config['storage']['vector']['milvus']
+            self._document_vector_storage = MilvusStorage(
+                dimension=1024,  # 使用嵌入维度
+                host=storage_config['host'],
+                port=storage_config['port'],
+                collection_name=storage_config['collection_name'],  # 使用文档专用集合名
+                database=storage_config.get('database', 'default'),
+                username=storage_config.get('username'),
+                password=storage_config.get('password'),
+                recreate_if_exists=False  # 检索器初始化时不重新创建
+            )
         
         # 创建向量检索器
         vector_retriever = VectorRetriever(
             tenant_id="default",
-            vector_storage=document_retrieval_storage,  # 使用文档专用向量存储
+            vector_storage=self._document_vector_storage,  # 使用统一的文档向量存储实例
             embedding_provider=self.embedding_router,
             **retrieval_config.get('vector', {})
         )
@@ -460,19 +462,20 @@ class AgenticXGraphRAGDemo:
         graph_storage = self.storage_manager.get_storage(StorageType.NEO4J)
         vector_storage = self.storage_manager.get_storage(StorageType.MILVUS)
         
-        # 🔧 为图向量创建独立的Milvus存储实例
-        from agenticx.storage.vectordb_storages.milvus import MilvusStorage
-        storage_config = self.config['storage']['vector']['milvus']
-        graph_vector_storage = MilvusStorage(
-            dimension=1024,  # 使用嵌入维度
-            host=storage_config['host'],
-            port=storage_config['port'],
-            collection_name=storage_config['graph_collection_name'],  # 使用图专用集合名
-            database=storage_config.get('database', 'default'),
-            username=storage_config.get('username'),
-            password=storage_config.get('password'),
-            recreate_if_exists=False  # 🔧 修复：qa模式下不要重新创建集合
-        )
+        # 🔧 确保图向量存储实例存在，如果不存在则创建
+        if not hasattr(self, '_graph_vector_storage') or not self._graph_vector_storage:
+            from agenticx.storage.vectordb_storages.milvus import MilvusStorage
+            storage_config = self.config['storage']['vector']['milvus']
+            self._graph_vector_storage = MilvusStorage(
+                dimension=1024,  # 使用嵌入维度
+                host=storage_config['host'],
+                port=storage_config['port'],
+                collection_name=storage_config['graph_collection_name'],  # 使用图专用集合名
+                database=storage_config.get('database', 'default'),
+                username=storage_config.get('username'),
+                password=storage_config.get('password'),
+                recreate_if_exists=False  # 🔧 修复：qa模式下不要重新创建集合
+            )
         
         # 配置图向量索引
         graph_vector_config = GraphVectorConfig(
@@ -483,7 +486,7 @@ class AgenticXGraphRAGDemo:
         graph_retriever = GraphRetriever(
             tenant_id="default",
             graph_storage=graph_storage,
-            vector_storage=graph_vector_storage,  # 使用图专用向量存储
+            vector_storage=self._graph_vector_storage,  # 使用统一的图向量存储实例
             embedding_provider=self.embedding_router,
             vector_config=graph_vector_config,
             **retrieval_config.get('graph', {})
@@ -784,15 +787,28 @@ class AgenticXGraphRAGDemo:
         except Exception as e:
             self.logger.error(f"❌ 数据缓存失败: {e}")
         
-        # 统计向量索引总数
-        vector_storage = await self.storage_manager.get_vector_storage('default')
+        # 统计向量索引总数 - 统计所有独立向量存储实例
         total_vectors = 0
-        if vector_storage:
+        
+        # 统计文档向量存储
+        if hasattr(self, '_document_vector_storage') and self._document_vector_storage:
             try:
-                status = vector_storage.status()
-                total_vectors = status.count
-            except:
-                pass
+                doc_status = self._document_vector_storage.status()
+                doc_vectors = doc_status.vector_count
+                total_vectors += doc_vectors
+                self.logger.debug(f"文档向量存储: {doc_vectors}条记录")
+            except Exception as e:
+                self.logger.debug(f"获取文档向量存储状态失败: {e}")
+        
+        # 统计图向量存储
+        if hasattr(self, '_graph_vector_storage') and self._graph_vector_storage:
+            try:
+                graph_status = self._graph_vector_storage.status()
+                graph_vectors = graph_status.vector_count
+                total_vectors += graph_vectors
+                self.logger.debug(f"图向量存储: {graph_vectors}条记录")
+            except Exception as e:
+                self.logger.debug(f"获取图向量存储状态失败: {e}")
         
         self.logger.info(f"存储和索引完成: 图数据库{len(self.knowledge_graph.entities)}个实体/{len(self.knowledge_graph.relationships)}个关系, 向量数据库{total_vectors}条记录")
     
@@ -817,7 +833,7 @@ class AgenticXGraphRAGDemo:
         
         # 🔧 为文档向量创建独立的Milvus存储实例
         storage_config = self.config['storage']['vector']['milvus']
-        document_vector_storage = MilvusStorage(
+        self._document_vector_storage = MilvusStorage(
             dimension=1024,  # 使用嵌入维度
             host=storage_config['host'],
             port=storage_config['port'],
@@ -906,7 +922,7 @@ class AgenticXGraphRAGDemo:
         
         # 批量存储文档分块向量
         if document_records:
-            await document_vector_storage.add(document_records)
+            await self._document_vector_storage.add(document_records)
             self.logger.info(f"✅ 文档向量索引完成: {len(document_records)}条记录")
             self.logger.info(f"📄 存储到集合: {storage_config['collection_name']}")
         else:
@@ -1265,101 +1281,36 @@ class AgenticXGraphRAGDemo:
     async def _process_query(self, query: str) -> None:
         """处理用户查询"""
         print(f"\n🔄 正在处理查询: {query}")
-        self.logger.info(f"处理查询: {query}")
+        self.logger.info(f"开始处理查询: {query}")
         
         try:
             # 获取检索配置
             retrieval_config = self.config.get('retrieval', {})
-            graph_config = retrieval_config.get('graph', {})
             vector_config = retrieval_config.get('vector', {})
+            hybrid_top_k = vector_config.get('top_k', 20)
+            similarity_threshold = vector_config.get('similarity_threshold', 0.2)
             
-            self.logger.debug(f"检索配置: 图检索max_nodes={graph_config.get('max_nodes', 50)}, 向量top_k={vector_config.get('top_k', 20)}")
+            # 1. 执行混合检索
+            self.logger.info(f"执行混合检索 (top_k={hybrid_top_k})")
+            hybrid_results = await self.retriever.retrieve(query, top_k=hybrid_top_k)
             
-            # 先尝试图检索（适合实体查询）
+            # 2. 执行图检索
             graph_results = []
             if hasattr(self, 'graph_retriever') and self.graph_retriever:
                 try:
-                    graph_top_k = min(graph_config.get('max_nodes', 50), 10)  # 限制在10以内
-                    graph_results = await self.graph_retriever.retrieve(query, top_k=graph_top_k)
-                    
-                    if graph_results:
-                        print(f"图检索: {len(graph_results)}条结果")
-                        self.logger.debug(f"图检索结果详情: {len(graph_results)}条")
-                        
-                        # 🔍 调试：显示图检索的详细内容
-                        print("\n🔍 图检索详细结果:")
-                        for i, result in enumerate(graph_results[:3], 1):  # 只显示前3个
-                            print(f"  📄 图结果 {i}:")
-                            print(f"     内容: {result.content[:200]}...")  # 显示前200字符
-                            print(f"     元数据: {result.metadata}")
-                            print(f"     相似度: {getattr(result, 'score', 'N/A')}")
-                    else:
-                        self.logger.debug("图检索无结果")
+                    graph_results = await self.graph_retriever.retrieve(query, top_k=10)
+                    self.logger.info(f"图检索完成: {len(graph_results)}条结果")
                 except Exception as e:
                     self.logger.warning(f"图检索失败: {e}")
             
-            # 使用混合检索器进行查询
-            hybrid_top_k = vector_config.get('top_k', 20)
+            # 3. 初步检索统计
+            print(f"\n📊 初步检索统计:")
+            print(f"  🔍 混合检索: {len(hybrid_results)}条")
+            print(f"  🔗 图检索: {len(graph_results)}条")
+            self.logger.info(f"初步检索完成 - 混合:{len(hybrid_results)}, 图:{len(graph_results)}")
             
-            # 🔍 调试：分别测试三路检索
-            print(f"\n🔍 测试三路检索组件:")
-            
-            # 测试文档向量检索
-            try:
-                vector_results = await self.retriever.vector_retriever.retrieve(query, top_k=hybrid_top_k)
-                print(f"  📄 文档向量检索: {len(vector_results)}条结果")
-                if vector_results:
-                    print(f"     示例内容: '{vector_results[0].content[:100]}...'")
-            except Exception as e:
-                print(f"  ❌ 文档向量检索失败: {e}")
-            
-            # 测试BM25检索
-            try:
-                bm25_results = await self.retriever.bm25_retriever.retrieve(query, top_k=hybrid_top_k)
-                print(f"  🔤 BM25检索: {len(bm25_results)}条结果")
-                if bm25_results:
-                    print(f"     示例内容: '{bm25_results[0].content[:100]}...'")
-            except Exception as e:
-                print(f"  ❌ BM25检索失败: {e}")
-            
-            # 测试图检索（在混合检索器内部的）
-            try:
-                if hasattr(self.retriever, 'graph_retriever') and self.retriever.graph_retriever:
-                    internal_graph_results = await self.retriever.graph_retriever.retrieve(query, top_k=hybrid_top_k)
-                    print(f"  🔗 内部图检索: {len(internal_graph_results)}条结果")
-                    if internal_graph_results:
-                        print(f"     示例内容: '{internal_graph_results[0].content[:100]}...'")
-                else:
-                    print(f"  ⚠️ 混合检索器中没有图检索器")
-            except Exception as e:
-                print(f"  ❌ 内部图检索失败: {e}")
-            
-            # 执行混合检索
-            hybrid_results = await self.retriever.retrieve(query, top_k=hybrid_top_k)
-            print(f"\n🔍 混合检索最终结果: {len(hybrid_results)}条")
-            
-            # 🔍 调试：显示混合检索的详细内容
-            if hybrid_results:
-                print("\n🔍 混合检索详细结果:")
-                for i, result in enumerate(hybrid_results[:3], 1):  # 只显示前3个
-                    print(f"  📄 混合结果 {i}:")
-                    print(f"     内容: '{result.content}'")  # 用引号包围，显示空内容
-                    print(f"     内容长度: {len(result.content)} 字符")
-                    print(f"     元数据: {result.metadata}")
-                    print(f"     相似度: {getattr(result, 'score', 'N/A')}")
-            
-            self.logger.debug(f"混合检索结果详情: {len(hybrid_results)}条")
-            
-            # 📊 显示检索结果统计
-            print(f"\n📊 检索结果统计:")
-            print(f"  🔗 图检索: {len(graph_results)}条结果")
-            print(f"  🔍 混合检索: {len(hybrid_results)}条结果")
-            
-            # 合并结果
-            all_results = graph_results + hybrid_results
-            self.logger.debug(f"合并检索结果: 图{len(graph_results)}+混合{len(hybrid_results)}={len(all_results)}条")
-            
-            # 去重并按相似度排序
+            # 4. 合并和去重
+            all_results = hybrid_results + graph_results
             seen_ids = set()
             unique_results = []
             for result in all_results:
@@ -1368,47 +1319,40 @@ class AgenticXGraphRAGDemo:
                     seen_ids.add(result_id)
                     unique_results.append(result)
             
-            self.logger.debug(f"去重后: {len(unique_results)}条")
-            print(f"  🔄 去重后: {len(unique_results)}条结果")
-            
-            # 按相似度排序
+            # 5. 按相似度排序和筛选
             unique_results.sort(key=lambda x: getattr(x, 'score', 0), reverse=True)
+            results = unique_results[:hybrid_top_k]
             
-            # 🔧 修复：从配置中读取最终结果数量，而不是硬编码5
-            final_top_k = vector_config.get('top_k', 20)  # 默认20，可配置
-            results = unique_results[:final_top_k]
-            
-            self.logger.debug(f"最终结果: {len(results)}条 (配置top_k: {final_top_k})")
-            print(f"  ✅ 最终采用: {len(results)}条结果 (配置top_k: {final_top_k})")
+            print(f"  🔄 去重后: {len(unique_results)}条")
+            print(f"  ✅ 最终采用: {len(results)}条")
+            self.logger.info(f"后处理完成 - 去重:{len(unique_results)}, 最终:{len(results)}")
             
             if not results:
                 print("❌ 没有找到相关信息")
-                self.logger.warning("❌ 检索未找到任何相关信息，尝试直接实体搜索")
-                # 尝试直接在Neo4j中搜索实体
+                self.logger.warning("检索无结果，尝试直接实体搜索")
                 await self._search_entity_directly(query)
                 return
             
-            # 显示检索配置信息
-            similarity_threshold = vector_config.get('similarity_threshold', 0.7)
-            print(f"\n✅ 找到 {len(results)} 条相关信息 (相似度阈值: {similarity_threshold}):\n")
+            # 6. 简化检索结果统计
+            print(f"\n📋 检索结果统计 (阈值: {similarity_threshold}):")
             
-            # 显示检索结果
-            for i, result in enumerate(results, 1):
-                score = getattr(result, 'score', 0)
-                score_status = "✅" if score >= similarity_threshold else "⚠️"
-                print(f"📄 结果 {i} {score_status} (相似度: {score:.3f})")
-                # 显示完整内容，不截断
-                print(f"   内容: {result.content}")
-                if result.metadata:
-                    print(f"   元数据: {result.metadata}")
-                print()
+            # 统计不同类型的结果
+            type_counts = {}
+            for result in results:
+                result_type = "其他"
+                if hasattr(result, 'metadata') and result.metadata:
+                    if 'search_source' in result.metadata:
+                        result_type = result.metadata['search_source']
+                    elif 'type' in result.metadata:
+                        result_type = result.metadata['type']
+                type_counts[result_type] = type_counts.get(result_type, 0) + 1
             
-            # 记录最终用于生成答案的检索内容
-            self.logger.info("📝 最终用于答案生成的检索内容:")
-            for i, result in enumerate(results, 1):
-                self.logger.info(f"  检索内容 {i}: {result.content}")
-                if result.metadata:
-                    self.logger.info(f"  元数据 {i}: {result.metadata}")
+            for result_type, count in type_counts.items():
+                print(f"  📊 {result_type}: {count}条")
+            
+            print(f"  ✅ 总计: {len(results)}条结果用于答案生成")
+            
+            self.logger.info(f"检索结果展示完成，准备生成答案")
             
             # 生成答案
             await self._generate_answer(query, results)
@@ -1458,54 +1402,41 @@ class AgenticXGraphRAGDemo:
     async def _generate_answer(self, query: str, results: List[Any]) -> None:
         """基于检索结果生成答案"""
         try:
-            # 显示完整的检索内容
-            print("\n" + "="*60)
-            print("🔍 完整检索内容详情:")
-            print("="*60)
-            for i, result in enumerate(results, 1):
-                print(f"\n📄 检索结果 {i}:")
-                print(f"   内容: {result.content}")
-                print(f"   元数据: {result.metadata}")
-                print(f"   相似度: {getattr(result, 'score', 'N/A')}")
-            print("="*60)
+            self.logger.info(f"开始生成答案，输入{len(results)}条检索结果")
             
-            # 🔧 修复：从配置中读取上下文数量，而不是硬编码3
+            # 获取上下文配置
             rag_config = self.config.get('rag', {})
             retrieval_config = rag_config.get('retrieval', {})
-            context_top_k = retrieval_config.get('default_top_k', 10)  # 默认10条
+            context_top_k = retrieval_config.get('default_top_k', 10)
             
-            # 🔧 分别提取图检索和文档检索结果，确保两者都包含在上下文中
+            # 分类检索结果
             graph_results = [r for r in results if r.metadata and r.metadata.get('search_source') == 'graph_vector']
-            doc_results = [r for r in results if r.metadata and r.metadata.get('type') == 'document_chunk']
+            doc_results = [r for r in results if r.metadata and (
+                r.metadata.get('type') in ['document_chunk', 'bm25_chunk'] or 
+                'document_id' in r.metadata or
+                'document_title' in r.metadata
+            )]
             other_results = [r for r in results if r not in graph_results and r not in doc_results]
             
-            # 🔍 调试信息：显示结果分类
-            print(f"\n🔍 结果分类统计:")
-            print(f"  📊 总结果数: {len(results)}")
-            print(f"  🔗 图检索结果: {len(graph_results)}")
-            print(f"  📄 文档检索结果: {len(doc_results)}")
-            print(f"  ❓ 其他结果: {len(other_results)}")
+            # 上下文构建统计
+            print(f"\n📝 上下文构建:")
+            print(f"  📊 结果分类: 图{len(graph_results)}条, 文档{len(doc_results)}条, 其他{len(other_results)}条")
+            self.logger.info(f"结果分类 - 图:{len(graph_results)}, 文档:{len(doc_results)}, 其他:{len(other_results)}")
             
-            if graph_results:
-                print(f"  🔗 图检索示例: '{graph_results[0].content[:50]}...'")
-            if doc_results:
-                print(f"  📄 文档检索示例: '{doc_results[0].content[:50]}...'")
-            if other_results:
-                print(f"  ❓ 其他结果示例: '{other_results[0].content[:50]}...'")
-                print(f"     元数据: {other_results[0].metadata}")
-            
-            # 构建平衡的上下文：优先包含文档检索结果，然后是图检索结果
+            # 构建平衡的上下文
             context_results = []
-            doc_count = min(len(doc_results), context_top_k // 2)  # 一半给文档检索
-            graph_count = min(len(graph_results), context_top_k - doc_count)  # 剩余给图检索
+            doc_count = min(len(doc_results), context_top_k // 2)
+            graph_count = min(len(graph_results), context_top_k - doc_count)
             
             context_results.extend(doc_results[:doc_count])
             context_results.extend(graph_results[:graph_count])
             
-            # 如果还有空间，添加其他结果
+            # 添加其他结果
             remaining = context_top_k - len(context_results)
             if remaining > 0:
                 context_results.extend(other_results[:remaining])
+            
+            print(f"  ✅ 最终上下文: {len(context_results)}条 (文档{doc_count}+图{graph_count}+其他{remaining})")
             
             # 🔧 重新设计上下文格式，参考youtu-graphrag的结构化格式
             context_sections = []
@@ -1595,8 +1526,6 @@ class AgenticXGraphRAGDemo:
             
             context = "\n".join(context_sections)
             
-            self.logger.debug(f"构建上下文: {len(context_results)}条结果 (配置: {context_top_k}), {len(context)}字符")
-            
             # 构建提示词
             prompt = f"""
 基于以下知识图谱信息回答用户问题。请提供准确、简洁的答案。
@@ -1609,7 +1538,11 @@ class AgenticXGraphRAGDemo:
 请回答:
 """
             
-            # 显示最终提示词
+            # 记录提示词信息
+            print(f"  📝 提示词构建完成: {len(context)}字符上下文")
+            self.logger.info(f"提示词构建完成 - 上下文:{len(context)}字符, 总长度:{len(prompt)}字符")
+            
+            # 显示完整提示词
             print("\n" + "="*60)
             print("📝 最终发送给大模型的提示词:")
             print("="*60)
@@ -1617,16 +1550,20 @@ class AgenticXGraphRAGDemo:
             print("="*60)
             
             # 调用 LLM 生成答案
-            self.logger.debug("调用大模型生成答案...")
+            print(f"\n🤖 正在生成答案...")
+            self.logger.info("开始调用大模型生成答案")
+            
             response = await self.llm_client.ainvoke(prompt)
             
-            # 记录结果
+            # 记录和显示结果
             self.logger.info(f"答案生成完成: {len(response.content)}字符")
             
-            print("\n🤖 AI 回答:")
-            print("-" * 40)
+            print(f"\n🤖 AI 回答:")
+            print("-" * 50)
+            
+            # 直接输出答案，保持原有格式
             print(response.content)
-            print("-" * 40)
+            print("-" * 50)
             
         except Exception as e:
             self.logger.error(f"答案生成错误: {e}")
