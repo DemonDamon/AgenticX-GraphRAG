@@ -1,0 +1,122 @@
+[
+  {
+    "query": "TableMind 和 QTMRL 都采用了强化学习进行策略优化，它们分别在哪些任务场景下验证了 RAPO 和 A2C 算法的有效性？",
+    "from_docs": ["2509.06278v1.pdf", "2508.20467v1.pdf"],
+    "expected_output": "TableMind 在表格推理任务（如 WikiTQ、TabMWP、TabFact）中验证了 RAPO 算法，显著优于基线方法；QTMRL 在量化交易任务（S&P 500 多股票组合管理）中验证了 A2C 算法，在 2020 和 2021 年回测中收益和风险调整指标均优于 ARIMA、LSTM 等传统模型。",
+    "criteria_clarify": "5分：答案准确对应两篇论文的核心实验场景与算法，且区分了 RAPO（用于复杂表格推理的多步决策）与 A2C（用于多资产交易决策）的任务差异，数据具体，无幻觉。"
+  },
+  {
+    "query": "TradingGroup 的自我反思机制如何利用过去交易案例改进未来决策？与 TableMind 的 Reflect 阶段在设计目标上有何异同？",
+    "from_docs": ["2508.17565v1.pdf", "2509.06278v1.pdf"],
+    "expected_output": "TradingGroup 通过数据合成管道自动标注历史交易案例（成功/失败），提取模式注入 LLM 上下文，引导模型纠正类似情境下的决策；TableMind 的 Reflect 阶段基于代码执行反馈（如错误或输出）动态调整后续计划。二者目标相似（基于反馈自我修正），但 TradingGroup 侧重交易策略优化和风格切换，TableMind 侧重解决表格任务中的计算错误和路径调整。",
+    "criteria_clarify": "5分：清晰对比两者反思机制的技术实现（TradingGroup 用标注数据，TableMind 用执行反馈）与应用场景差异，无混淆，引用设计目标准确。"
+  },
+  {
+    "query": "FinAgentBench 和 FutureX 都评估 LLM 在动态环境中的表现，但前者聚焦检索，后者聚焦预测。请说明二者在评估维度、任务形式和防数据污染机制上的核心区别。",
+    "from_docs": ["2508.14052v3.pdf", "2508.11987v3.pdf"],
+    "expected_output": "FinAgentBench 评估检索能力（文档类型选择与段落排序），任务为结构化 QA，防污染靠专家标注与固定测试集；FutureX 评估预测能力（多领域未来事件），任务为开放预测，防污染靠完全前瞻性设计（答案在预测后才发生）。前者用 nDCG/MRR，后者用 WinRate/MAPE 与自定义评分。",
+    "criteria_clarify": "5分：准确区分检索 vs 预测任务性质、评估指标、防污染机制（前瞻 vs 标注），引用具体评估维度（如 FinAgentBench 的 chunk ranking vs FutureX 的 Level 4 volatility），无概念模糊。"
+  },
+  {
+    "query": "在 QTMRL 和 TradingGroup 中，风险控制模块分别如何与强化学习策略交互？请比较二者在止损机制设计上的技术路径差异。",
+    "from_docs": ["2508.20467v1.pdf", "2508.17565v1.pdf"],
+    "expected_output": "QTMRL 的 A2C 策略本身不显式处理风险，奖励函数含波动惩罚项；TradingGroup 的风险模块独立于 RL，采用硬性拦截机制（基于历史波动率动态设置止损/止盈阈值），并由 Style Agent 调整阈值系数。前者是策略内优化，后者是策略外约束。",
+    "criteria_clarify": "5分：准确指出 QTMRL 通过奖励函数隐式控制风险，TradingGroup 通过独立模块硬拦截，区分“策略内”与“策略外”，引用具体机制（如 TradingGroup 的 σ_d,10 公式），无混淆。"
+  },
+  {
+    "query": "TableMind 的两阶段训练（SFT + RFT）与 TradingGroup 的数据合成+PEFT 微调，在提升模型泛化能力的目标上采用了哪些相似与不同的技术路线？",
+    "from_docs": ["2509.06278v1.pdf", "2508.17565v1.pdf"],
+    "expected_output": "相似点：均使用专家轨迹（TableMind 用教师模型，TradingGroup 用 DeepSeek-R1）进行监督预热；不同点：TableMind 的 RFT 是在线策略优化，TradingGroup 的 PEFT 是离线参数高效微调（LoRA）。前者强调策略探索与自我修正，后者强调数据质量与轻量适配。",
+    "criteria_clarify": "5分：准确指出 SFT 与数据合成在“专家轨迹”上的相似性，区分 RFT（在线策略梯度）与 PEFT（离线参数微调）的本质差异，引用具体技术（LoRA, RAPO），目标对比清晰。"
+  },
+  {
+    "query": "FutureX 中 Level 4 “Super Agent” 任务要求模型具备哪些能力？这些能力是否在 FinAgentBench 的 Chunk Ranking 任务中也有体现？请对比说明。",
+    "from_docs": ["2508.11987v3.pdf", "2508.14052v3.pdf"],
+    "expected_output": "FutureX Level 4 要求高波动开放预测，需广泛信息搜寻+深度不确定推理；FinAgentBench Chunk Ranking 需定位文档内相关段落，侧重细粒度语义匹配与结构理解。前者强调“预测不确定性”，后者强调“检索精确性”，能力交集在信息整合，但核心目标不同。",
+    "criteria_clarify": "5分：准确引用 Level 4 定义（高波动、开放、super-agent），对比 FinAgentBench 的 chunk 评分（0/1/2 相关度），指出“预测”vs“检索”本质差异，能力交集分析合理。"
+  },
+  {
+    "query": "TradingGroup 的 Style-Preference Agent 如何根据账户状态动态调整交易风格？该机制与 TableMind 的多轮工具调用循环在决策灵活性上有何设计共性？",
+    "from_docs": ["2508.17565v1.pdf", "2509.06278v1.pdf"],
+    "expected_output": "Style Agent 分析历史盈亏与当前持仓，切换激进/保守风格并调整仓位；TableMind 通过 Plan-Action-Reflect 循环根据执行反馈调整后续步骤。共性在于“状态感知”和“动态调整”，TradingGroup 调风格，TableMind 调计算路径，均实现非线性决策。",
+    "criteria_clarify": "5分：准确描述 Style Agent 的输入（账户状态/历史PnL）与输出（风格+仓位），对比 TableMind 的循环结构，提炼“状态感知+动态调整”共性，无过度引申。"
+  },
+  {
+    "query": "在量化交易领域，QTMRL、TradingGroup 和 FutureX 中与 Wall Street 分析师对比的案例，分别从什么角度证明了 LLM 代理的竞争力？请分述其结论局限性。",
+    "from_docs": ["2508.20467v1.pdf", "2508.17565v1.pdf", "2508.11987v3.pdf"],
+    "expected_output": "QTMRL 证明在多资产组合上超额收益；TradingGroup 证明在风险调整后收益优于人类；FutureX 案例显示 LLM 在 37.5% 收益预测上胜过分析师共识。局限：QTMRL 未比人类；TradingGroup 限于回测；FutureX 胜率<50% 且未考虑人类主观判断优势。",
+    "criteria_clarify": "5分：分述三者比较对象（组合收益/风险收益/分析师共识）和具体指标（Sharpe/胜率），指出各自局限性（未比人类/回测局限/胜率不足），引用数据准确，无夸大结论。"
+  },
+  {
+    "query": "TableMind 的 RAPO 算法如何解决策略梯度中的“置信度-奖励错位”问题？该机制是否可迁移到 TradingGroup 的数据合成奖励设计中？请论证可行性。",
+    "from_docs": ["2509.06278v1.pdf", "2508.17565v1.pdf"],
+    "expected_output": "RAPO 通过 γ_w,l 加权，当模型对低奖励轨迹置信度更高时加大其梯度权重；TradingGroup 的 w_hit 和 reward_a 已包含置信度（p_true）与方向正确性（sign_ok），但未显式对比高低质量轨迹置信度排序，故可借鉴 RAPO 设计奖励重加权机制以提升数据筛选效率。",
+    "criteria_clarify": "5分：准确解释 RAPO 的 γ_w,l 机制，对比 TradingGroup 的 w_hit（含 p_true, sign_ok）和 reward_a（含成本惩罚），提出可行迁移方向（奖励重加权），论证基于现有公式，无臆测。"
+  },
+  {
+    "query": "FinAgentBench 的 Document Ranking 任务要求模型理解财报结构，而 TableMind 需解析表格数据。二者在结构化数据理解任务中，分别依赖模型的哪些先验知识？这些知识是如何注入模型的？",
+    "from_docs": ["2508.14052v3.pdf", "2509.06278v1.pdf"],
+    "expected_output": "FinAgentBench 依赖模型对 SEC 文件类型（如 10-K 风险章节）的结构先验，通过零样本提示或微调注入；TableMind 依赖对表格行列语义与计算逻辑的理解，通过 SFT 阶段的专家轨迹（含 <tool><response> 标签）注入。前者靠领域知识，后者靠执行模式。",
+    "criteria_clarify": "5分：准确指出 FinAgentBench 关联财报结构常识，TableMind 关联表格计算模式，区分注入方式（零样本/微调 vs SFT 轨迹），引用具体技术（标签模板），无混淆概念。"
+  },
+  {
+    "query": "FutureX 案例中，Grok-4 在 Level 4 任务表现最优，其高搜索量是否是性能主因？对比 SmolAgent 的规划分析，说明搜索行为与规划质量对复杂任务的相对贡献。",
+    "from_docs": ["2508.11987v3.pdf", "2508.11987v3.pdf"],
+    "expected_output": "Grok-4 高搜索量是性能因素之一，但非唯一主因；SmolAgent 分析显示规划质量（全面性/可靠性/可执行性）对得分贡献更大（回归系数显著）。Grok-4 可能兼具优质规划与高搜索效率，而低质量搜索（如 Hunyuan 低搜索量）导致性能下降，表明规划指导下的有效搜索才是关键。",
+    "criteria_clarify": "5分：引用 FutureX 图14（搜索量）与图13（规划系数），指出搜索量与规划质量均重要，但规划系数更显著，结论有数据支撑，无因果倒置。"
+  },
+  {
+    "query": "TradingGroup 的风险模块采用‘硬拦截’，而 QTMRL 的 A2C 采用‘软约束’（奖励函数）。从系统鲁棒性角度，分析二者在应对极端市场事件时的潜在优劣。",
+    "from_docs": ["2508.17565v1.pdf", "2508.20467v1.pdf"],
+    "expected_output": "硬拦截（TradingGroup）在黑天鹅事件中可强制止损，避免灾难性损失，鲁棒性高但可能错失反弹；软约束（QTMRL）依赖策略泛化，可能在极端事件中失效，但长期适应性更强。前者适合高风险厌恶场景，后者适合平稳市场持续优化。",
+    "criteria_clarify": "5分：准确对比“硬拦截”与“软约束”机制，分析极端事件下的行为差异（强制止损 vs 策略失效），指出适用场景（高风险厌恶 vs 平稳市场），论证符合论文设计意图。"
+  },
+  {
+    "query": "TableMind 在 TabFact 任务（事实验证）上的性能提升主要源于哪个组件？对比 FinAgentBench 的 Chunk Ranking 任务，说明结构化事实验证与非结构化段落检索在模型能力需求上的核心差异。",
+    "from_docs": ["2509.06278v1.pdf", "2508.14052v3.pdf"],
+    "expected_output": "TableMind 在 TabFact 的提升主要来自 RAPO 优化的多步推理与自省纠错能力；TabFact 需精确匹配表格单元格与语句逻辑关系，FinAgentBench Chunk Ranking 需理解段落语义相关性。前者强调“逻辑一致性验证”，后者强调“语义相关性排序”，能力需求不同。",
+    "criteria_clarify": "5分：引用 Table 1 和图 4 说明 RAPO 对 TabFact 的贡献，对比 TabFact（label accuracy）与 FinAgentBench（graded relevance）的任务目标，区分“验证”与“检索”能力差异，分析到位。"
+  },
+  {
+    "query": "FutureX 的评估延迟设计（一周窗口）如何影响模型性能评估的稳定性？对比传统静态基准（如 MMLU），说明该设计对防止过拟合的额外价值。",
+    "from_docs": ["2508.11987v3.pdf", "2508.11987v3.pdf"],
+    "expected_output": "一周延迟平滑了单日随机波动，提升评估稳定性（图7显示缺失率<20%时std可控）；相比 MMLU 等静态基准，延迟使开发者无法即时优化模型，强制模型依赖泛化能力而非记忆，有效防过拟合，符合“前瞻防污染”设计原则。",
+    "criteria_clarify": "5分：引用评估延迟设计理由（平滑随机性）与图7标准差数据，对比静态基准的“记忆风险”，指出“延迟防过拟合”机制，逻辑严密，数据支撑充分。"
+  },
+  {
+    "query": "TradingGroup 的数据合成管道为 Style Agent 生成了哪些关键特征？这些特征是否可被 TableMind 的 Observation 阶段所利用？请从状态表示角度论证跨任务迁移可能性。",
+    "from_docs": ["2508.17565v1.pdf", "2509.06278v1.pdf"],
+    "expected_output": "TradingGroup 为 Style Agent 生成账户状态（持仓/现金/PnL）、历史风格收益、波动系数等特征；TableMind 的 Observation 仅反馈代码执行结果（如错误/数值）。前者是“金融状态向量”，后者是“计算状态反馈”，虽均为状态表示，但语义空间不同，直接迁移困难，需重新设计状态编码器。",
+    "criteria_clarify": "5分：准确列出 TradingGroup 的账户特征，对比 TableMind 的 observation 内容，指出“金融状态”与“计算状态”的语义鸿沟，迁移需架构调整，论证合理，无强行关联。"
+  },
+  {
+    "query": "在应对网络攻击（假新闻）的鲁棒性测试中，GPT-o3 Deep Research 被误导，而 Gemini Deep Research 抵抗成功。该结果对 TableMind 的代码 sandbox 执行安全设计有何借鉴意义？",
+    "from_docs": ["2508.11987v3.pdf", "2509.06278v1.pdf"],
+    "expected_output": "Gemini 可能依赖后端可信源过滤；TableMind 的 sandbox 虽隔离代码执行，但不验证数据源真实性。可借鉴引入“数据源可信度评估模块”，在代码执行前对输入数据进行来源信誉检查，或在 Reflect 阶段增加数据真实性验证步骤，提升整体系统鲁棒性。",
+    "criteria_clarify": "5分：引用假新闻实验结论（Gemini 过滤假站），对比 TableMind 的 sandbox 仅隔离执行，提出具体改进方向（数据源验证模块），方案贴合 TableMind 的 Reflect 机制，有可行性。"
+  },
+  {
+    "query": "FinAgentBench 的 fine-tuning 实验显示 nDCG 提升 5%，而 TradingGroup 的 PEFT 使收益提升 457%。请分析二者性能增益差异巨大的根本原因，并说明评估指标是否可比。",
+    "from_docs": ["2508.14052v3.pdf", "2508.17565v1.pdf"],
+    "expected_output": "根本原因：FinAgentBench 提升的是检索相关性排序（nDCG@5 0.758→0.808），任务本身准确率较高；TradingGroup 提升的是交易决策收益（CR 3.2→40.5%），原策略近乎随机。评估指标不可比：nDCG 是排序质量指标，CR 是绝对收益指标，任务难度与基线水平差异导致增益幅度不同。",
+    "criteria_clarify": "5分：引用具体数据（nDCG 0.758→0.808 vs CR 3.2→40.5%），分析任务本质差异（检索排序 vs 交易收益），明确指标不可比，结论严谨，无误导性比较。"
+  },
+  {
+    "query": "TableMind 的工具调用轮次限制为 3，QTMRL 的 episode 长度为 20 步。从任务复杂度角度，解释二者设计差异的合理性，并说明若互换限制可能导致什么问题。",
+    "from_docs": ["2509.06278v1.pdf", "2508.20467v1.pdf"],
+    "expected_output": "TableMind 任务（表格QA）通常 2-3 步可解，限制 3 轮防冗余；QTMRL 需多日交易决策，20 步对应约 20 个交易日。若 TableMind 用 20 步，将导致过度计算与错误累积；若 QTMRL 用 3 步，则无法建模多日持仓与市场动态，策略失效。",
+    "criteria_clarify": "5分：准确关联 TableMind 多步推理（图6 案例为2步）与 QTMRL 时间序列特性（20步=20日），分析互换限制的后果（冗余 vs 信息不足），引用实验依据（Table 3 的 Max Turns 分析），无主观臆断。"
+  },
+  {
+    "query": "FutureX 中人类专家在 Level 1 任务上表现不如部分 LLM，但在 Level 4 任务上显著优于所有模型。这一现象揭示了当前 LLM 代理在处理何种类型任务时仍存在本质缺陷？",
+    "from_docs": ["2508.11987v3.pdf", "2508.11987v3.pdf"],
+    "expected_output": "Level 1 为单选题（记忆/简单检索），LLM 知识库占优；Level 4 为高波动开放预测，需深度不确定性推理、跨域知识融合与战略判断，当前 LLM 缺乏人类级抽象建模与长程因果推断能力，导致在复杂、模糊、高风险任务上表现本质性落后。",
+    "criteria_clarify": "5分：准确引用 Level 1（基础单选）与 Level 4（超级代理）定义，对比人类优势（抽象/战略/因果），指出 LLM 在“不确定性推理”和“长程建模”上的本质缺陷，分析符合论文结论。"
+  },
+  {
+    "query": "TradingGroup 使用 LoRA 微调 Qwen3-8B 仅需 6 小时，而 TableMind 在 4xGPU 上训练多日。请从模型架构、训练目标和数据规模角度，解释二者计算效率差异的根源。",
+    "from_docs": ["2508.17565v1.pdf", "2509.06278v1.pdf"],
+    "expected_output": "根源：TradingGroup 用 PEFT (LoRA) 仅微调 0.53% 参数，目标为适应交易决策；TableMind 需全参优化 SFT+RFT，目标为掌握代码生成与多步推理，数据虽小（200样本）但需多次策略迭代。前者是轻量适配，后者是重型策略学习，故计算成本差异巨大。",
+    "criteria_clarify": "5分：准确引用参数微调比例（0.53%）、训练目标（交易决策 vs 代码推理）、数据规模（LoRA 用 1080 样本 vs SFT 200 样本）和硬件（单 V100 vs 4x A800），分析计算效率差异根源，数据精确，逻辑清晰。"
+  }
+]
