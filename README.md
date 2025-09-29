@@ -275,13 +275,13 @@ HybridRetriever             # 混合检索器
 ### 1. 环境准备
 
 ```bash
-# 进入项目目录
-cd /Users/damon/myWork/AgenticX/examples/agenticx-for-graphrag
+# 克隆项目仓库
+git clone https://github.com/DemonDamon/AgenticX-GraphRAG.git
+cd AgenticX-GraphRAG
 
-# 创建并激活虚拟环境
-python -m venv venv
-source venv/bin/activate  # macOS/Linux
-# 或 venv\Scripts\activate  # Windows
+# 使用anaconda创建虚拟环境
+conda create -n agenticx_graphrag python=3.10 -y
+conda activate agenticx_graphrag
 
 # 安装项目依赖
 pip install -r requirements.txt
@@ -299,45 +299,73 @@ cp .env.example .env
 BAILIAN_API_KEY=your_bailian_api_key
 BAILIAN_BASE_URL=https://dashscope.aliyuncs.com/compatible-mode/v1
 
-# 或者使用OpenAI
-OPENAI_API_KEY=your_openai_api_key
-OPENAI_BASE_URL=https://api.openai.com/v1
-
-# Neo4j配置
+# Neo4j图数据库配置
 NEO4J_URI=bolt://localhost:7687
 NEO4J_USERNAME=neo4j
 NEO4J_PASSWORD=your_password
 
-# Redis配置（可选）
+# Milvus向量数据库配置
+MILVUS_HOST=localhost
+MILVUS_PORT=19530
+MILVUS_USER=
+MILVUS_PASSWORD=
+
+# Redis缓存配置
 REDIS_HOST=localhost
 REDIS_PORT=6379
+REDIS_PASSWORD=password
 ```
 
-### 3. 启动外部服务
+### 3. 启动数据层服务
+
+使用docker-compose启动完整的数据层服务栈：
 
 ```bash
-# 启动Neo4j（使用Docker）
-docker run -d \
-  --name neo4j \
-  -p 7474:7474 -p 7687:7687 \
-  -e NEO4J_AUTH=neo4j/your_password \
-  neo4j:latest
+# 进入docker目录
+cd docker
 
-# 启动Redis（可选）
-docker run -d \
-  --name redis \
-  -p 6379:6379 \
-  redis:latest
+# 启动所有数据层服务（Neo4j、Milvus、Redis等）
+docker-compose up -d
+
+# 检查服务状态
+docker-compose ps
+
+# 查看服务日志（可选）
+docker-compose logs -f
 ```
+
+服务启动后可通过以下地址访问管理界面：
+- Neo4j Browser: http://localhost:7474
+- Milvus Attu: http://localhost:3001  
+- Redis Commander: http://localhost:8081
 
 ### 4. 准备文档数据
 
 ```bash
-# 将您的文档放入data目录
+# 创建数据目录
 mkdir -p data
-# 支持格式：PDF、TXT、MD、JSON、CSV
+
+# 将您的文档放入data目录
 cp your_documents.* data/
 ```
+
+**支持的文档格式：**
+
+| 格式类型 | 文件扩展名 | 说明 | 推荐用途 |
+|---------|-----------|------|---------|
+| **PDF文档** | `.pdf` | 支持文本提取和OCR识别 | 学术论文、技术文档、报告 |
+| **文本文档** | `.txt` | 纯文本格式，处理速度最快 | 简单文档、日志文件 |
+| **Markdown** | `.md` | 支持结构化标记语言 | 技术文档、说明文档 |
+| **JSON数据** | `.json` | 结构化数据格式 | API文档、配置文件 |
+| **CSV表格** | `.csv` | 表格数据格式 | 数据报表、统计信息 |
+| **Word文档** | `.docx` | Microsoft Word格式 | 商业文档、合同文件 |
+| **Excel表格** | `.xlsx` | Microsoft Excel格式 | 数据分析、财务报表 |
+
+**文档准备建议：**
+- 单个文档大小建议不超过50MB
+- 批量处理时建议每批不超过100个文档
+- PDF文档确保文本可选择（非纯图片扫描）
+- 文档内容应具有一定的结构性和逻辑性
 
 ### 5. 运行演示
 
