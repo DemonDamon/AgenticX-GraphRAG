@@ -4,7 +4,7 @@ name: "schema_generation"
 description: "分析文档内容，生成定制化的知识图谱Schema"
 version: "1.0"
 
-# 主要模板
+# 主要模板（用于完整文档内容）
 template: |
   你是知识图谱Schema设计专家。请分析以下文档内容，基于基础Schema生成一个定制化的Schema，用于后续的知识抽取。
 
@@ -13,9 +13,9 @@ template: |
   {base_schema}
   ```
 
-  文档内容概览：
+  文档内容：
   ```
-  {document_summary}
+  {document_content}
   ```
 
   文档类别：{document_category}
@@ -54,6 +54,41 @@ template: |
 
   只返回JSON，无其他内容。
 
+# 分块处理模板（用于大文档迭代）
+chunk_template: |
+  你是知识图谱Schema设计专家。请分析当前文档块，基于已有Schema进行迭代更新。
+
+  当前Schema：
+  ```json
+  {current_schema}
+  ```
+
+  文档块内容：
+  ```
+  {document_chunk}
+  ```
+
+  任务要求：
+  1. 分析当前文档块中的新实体、关系和属性类型
+  2. 基于已有Schema进行增量更新
+  3. 只添加确实需要的新类型
+  4. 保持Schema的一致性和完整性
+
+  输出更新后的完整Schema：
+  ```json
+  {{
+    "Nodes": ["所有实体类型..."],
+    "Relations": ["所有关系类型..."], 
+    "Attributes": ["所有属性类型..."],
+    "domain_info": {{
+      "primary_domain": "主要领域",
+      "sub_domains": ["子领域..."],
+      "key_concepts": ["核心概念..."],
+      "reasoning": "更新理由"
+    }}
+  }}
+  ```
+
 # 简化模板（用于较短文档）
 simple_template: |
   分析文档内容，基于基础Schema生成定制Schema：
@@ -75,9 +110,12 @@ simple_template: |
 
 # 配置参数
 config:
-  max_document_length: 3000  # 文档摘要最大长度
+  max_document_length: 120000  # 文档内容最大长度（充分利用128k上下文）
+  chunk_size: 30000  # 分块大小（用于超大文档）
+  chunk_overlap: 3000  # 分块重叠
   min_confidence_threshold: 0.8  # 新类型添加的最小置信度
-  max_new_types_per_category: 10  # 每个类别最多新增类型数
+  max_new_types_per_category: 15  # 每个类别最多新增类型数
+  enable_iterative_processing: true  # 启用迭代处理
   
 # 示例输出
 example_output: |
