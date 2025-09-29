@@ -188,6 +188,80 @@ graph TD
    }
    ```
 
+### 🔧 **动态实体创建机制**
+
+**核心创新**: 智能实体补全，解决关系抽取中的实体缺失问题
+
+**问题背景**:
+在SPO抽取过程中，LLM可能识别出关系三元组，但关系中涉及的某些实体在之前的实体抽取阶段被遗漏，导致：
+- ❌ 关系无法建立（缺少端点实体）
+- ❌ 知识图谱不完整
+- ❌ 检索效果下降
+
+**解决方案**:
+```python
+# 当发现关系 ["PyTorch", "supports", "神经网络"] 时
+# 如果"神经网络"实体不存在，系统会：
+
+def _create_missing_entity(self, entity_name: str) -> str:
+    """动态创建缺失的实体"""
+    
+    # 1. 智能过滤无意义实体
+    if len(entity_name.strip()) < 2:
+        return None
+        
+    # 2. 启发式类型推断
+    entity_type = self._infer_entity_type(entity_name)
+    # "神经网络" → EntityType.CONCEPT
+    
+    # 3. 创建实体对象
+    new_entity = Entity(
+        id=str(uuid.uuid4()),
+        name=entity_name,
+        entity_type=entity_type,
+        description=f"动态创建的实体: {entity_name}",
+        confidence=0.7  # 标记为动态创建
+    )
+    
+    return new_entity.id
+```
+
+**智能类型推断规则**:
+```python
+def _infer_entity_type(self, entity_name: str) -> EntityType:
+    """基于实体名称特征推断类型"""
+    
+    name_lower = entity_name.lower()
+    
+    # 人员相关
+    if any(word in name_lower for word in ['人', '者', '员', 'person', 'researcher']):
+        return EntityType.PERSON
+    
+    # 组织相关  
+    if any(word in name_lower for word in ['公司', '组织', '机构', 'company']):
+        return EntityType.ORGANIZATION
+        
+    # 地点相关
+    if any(word in name_lower for word in ['地', '市', '国', 'location', 'city']):
+        return EntityType.LOCATION
+        
+    # 技术概念（默认）
+    return EntityType.CONCEPT
+```
+
+**核心优势**:
+- 🔧 **自动补全**: 确保关系完整性，无需手动干预
+- 🧠 **智能推断**: 基于语义特征自动推断实体类型
+- 📊 **质量控制**: 过滤无意义实体，设置合理置信度
+- 🔄 **增量友好**: 支持知识图谱的增量更新和扩展
+- 🎯 **领域适应**: 特别适用于多领域文档的混合处理
+
+**应用场景**:
+- 📈 **金融文档**: 动态识别新的金融产品、交易策略
+- 🔬 **科研论文**: 自动发现新的算法、模型、技术概念  
+- 🏢 **企业文档**: 识别组织结构、业务流程中的新实体
+- 🌍 **多语言文档**: 跨语言实体的统一管理
+
 ### 🕸️ **阶段3: 知识图谱构建**
 
 **目标**: 构建完整的知识图谱并进行优化
