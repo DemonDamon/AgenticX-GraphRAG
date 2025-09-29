@@ -89,6 +89,9 @@ from agenticx.retrieval import (
 )
 from agenticx.llms import LlmFactory
 
+# 导入本地模块
+from prompt_manager import PromptManager
+
 
 class AgenticXGraphRAGDemo:
     """AgenticX GraphRAG 演示系统主类"""
@@ -106,6 +109,9 @@ class AgenticXGraphRAGDemo:
         self.storage_manager = None
         self.knowledge_graph = None
         self.retriever = None
+        
+        # 提示词管理器
+        self.prompt_manager = PromptManager("prompts")
         
         # 数据路径
         self.data_dir = Path("./data")
@@ -1291,7 +1297,7 @@ class AgenticXGraphRAGDemo:
             similarity_threshold = vector_config.get('similarity_threshold', 0.2)
             
             # 1. 执行混合检索
-            self.logger.info(f"执行混合检索 (top_k={hybrid_top_k})")
+            # 1. 执行混合检索
             hybrid_results = await self.retriever.retrieve(query, top_k=hybrid_top_k)
             
             # 2. 执行图检索
@@ -1299,17 +1305,10 @@ class AgenticXGraphRAGDemo:
             if hasattr(self, 'graph_retriever') and self.graph_retriever:
                 try:
                     graph_results = await self.graph_retriever.retrieve(query, top_k=10)
-                    self.logger.info(f"图检索完成: {len(graph_results)}条结果")
                 except Exception as e:
                     self.logger.warning(f"图检索失败: {e}")
             
-            # 3. 初步检索统计
-            print(f"\n📊 初步检索统计:")
-            print(f"  🔍 混合检索: {len(hybrid_results)}条")
-            print(f"  🔗 图检索: {len(graph_results)}条")
-            self.logger.info(f"初步检索完成 - 混合:{len(hybrid_results)}, 图:{len(graph_results)}")
-            
-            # 4. 合并和去重
+            # 3. 合并和去重
             all_results = hybrid_results + graph_results
             seen_ids = set()
             unique_results = []
@@ -1319,24 +1318,11 @@ class AgenticXGraphRAGDemo:
                     seen_ids.add(result_id)
                     unique_results.append(result)
             
-            # 5. 按相似度排序和筛选
+            # 4. 按相似度排序和筛选
             unique_results.sort(key=lambda x: getattr(x, 'score', 0), reverse=True)
             results = unique_results[:hybrid_top_k]
             
-            print(f"  🔄 去重后: {len(unique_results)}条")
-            print(f"  ✅ 最终采用: {len(results)}条")
-            self.logger.info(f"后处理完成 - 去重:{len(unique_results)}, 最终:{len(results)}")
-            
-            if not results:
-                print("❌ 没有找到相关信息")
-                self.logger.warning("检索无结果，尝试直接实体搜索")
-                await self._search_entity_directly(query)
-                return
-            
-            # 6. 简化检索结果统计
-            print(f"\n📋 检索结果统计 (阈值: {similarity_threshold}):")
-            
-            # 统计不同类型的结果
+            # 5. 统计不同类型的结果
             type_counts = {}
             for result in results:
                 result_type = "其他"
@@ -1347,12 +1333,21 @@ class AgenticXGraphRAGDemo:
                         result_type = result.metadata['type']
                 type_counts[result_type] = type_counts.get(result_type, 0) + 1
             
+            # 6. 优化后的统一日志输出
+            self.logger.info(f"完成执行混合检索 (top_k={hybrid_top_k}，阈值={similarity_threshold})")
+            
+            if not results:
+                print("❌ 没有找到相关信息")
+                self.logger.warning("检索无结果，尝试直接实体搜索")
+                await self._search_entity_directly(query)
+                return
+            
+            # 统一的检索统计信息
+            stats_info = f"检索统计:\n🔍 混合检索: {len(hybrid_results)}条\n🔗 图检索: {len(graph_results)}条\n🔄 去重后: {len(unique_results)}条\n✅ 最终采用: {len(results)}条，其中："
             for result_type, count in type_counts.items():
-                print(f"  📊 {result_type}: {count}条")
+                stats_info += f"\n    {result_type}: {count}条"
             
-            print(f"  ✅ 总计: {len(results)}条结果用于答案生成")
-            
-            self.logger.info(f"检索结果展示完成，准备生成答案")
+            self.logger.info(stats_info)
             
             # 生成答案
             await self._generate_answer(query, results)
@@ -1418,11 +1413,6 @@ class AgenticXGraphRAGDemo:
             )]
             other_results = [r for r in results if r not in graph_results and r not in doc_results]
             
-            # 上下文构建统计
-            print(f"\n📝 上下文构建:")
-            print(f"  📊 结果分类: 图{len(graph_results)}条, 文档{len(doc_results)}条, 其他{len(other_results)}条")
-            self.logger.info(f"结果分类 - 图:{len(graph_results)}, 文档:{len(doc_results)}, 其他:{len(other_results)}")
-            
             # 构建平衡的上下文
             context_results = []
             doc_count = min(len(doc_results), context_top_k // 2)
@@ -1435,8 +1425,6 @@ class AgenticXGraphRAGDemo:
             remaining = context_top_k - len(context_results)
             if remaining > 0:
                 context_results.extend(other_results[:remaining])
-            
-            print(f"  ✅ 最终上下文: {len(context_results)}条 (文档{doc_count}+图{graph_count}+其他{remaining})")
             
             # 🔧 重新设计上下文格式，参考youtu-graphrag的结构化格式
             context_sections = []
@@ -1461,14 +1449,35 @@ class AgenticXGraphRAGDemo:
                     if vector_type == 'node' or 'Entity' in result.content:
                         # 提取实体名称和描述
                         content = result.content
+                        entity_name = ""
+                        entity_desc = ""
+                        
                         if ' - ' in content:
                             parts = content.split(' - ')
-                            entity_name = parts[0]
+                            entity_name = parts[0].replace('Entity: ', '').strip()
                             entity_desc = parts[1].replace(' - (类型: Entity)', '') if len(parts) > 1 else ''
                         else:
                             parts = content.split('. ')
-                            entity_name = parts[0]
+                            entity_name = parts[0].replace('Entity: ', '').strip()
                             entity_desc = parts[1] if len(parts) > 1 and parts[1] != 'Labels: Entity' else ''
+                        
+                        # 过滤掉无用的"动态创建的实体"描述
+                        if entity_desc.startswith('动态创建的实体:') or entity_desc.startswith('实体:'):
+                            # 尝试从metadata中获取更好的描述
+                            if result.metadata and 'description' in result.metadata:
+                                entity_desc = result.metadata['description']
+                            elif result.metadata and 'properties' in result.metadata:
+                                props = result.metadata['properties']
+                                if isinstance(props, dict) and 'description' in props:
+                                    entity_desc = props['description']
+                                else:
+                                    entity_desc = f"知识图谱实体"
+                            else:
+                                entity_desc = f"知识图谱实体"
+                        
+                        # 确保描述有意义
+                        if not entity_desc or entity_desc.strip() in ['', 'Labels: Entity']:
+                            entity_desc = f"知识图谱中的{entity_name}实体"
                         
                         entities.append(f"• {entity_name}: {entity_desc} [score: {score:.3f}]")
                     
@@ -1526,20 +1535,35 @@ class AgenticXGraphRAGDemo:
             
             context = "\n".join(context_sections)
             
-            # 构建提示词
-            prompt = f"""
-基于以下知识图谱信息回答用户问题。请提供准确、简洁的答案。
+            # 使用提示词管理器加载模板
+            try:
+                prompt_template = self.prompt_manager.get_prompt_template("rag_qa", "template")
+                if prompt_template:
+                    prompt = prompt_template.format(context=context, query=query)
+                else:
+                    # 回退到默认模板
+                    prompt = f"""你是一个专业的智能问答助手，能够基于多种来源的信息为用户提供准确、全面的答案。
 
-知识图谱信息:
+## 检索到的相关信息
 {context}
 
-用户问题: {query}
+## 用户问题
+{query}
 
-请回答:
-"""
+## 请提供答案"""
+            except Exception as e:
+                self.logger.warning(f"提示词模板加载失败，使用默认模板: {e}")
+                prompt = f"""你是一个专业的智能问答助手，能够基于多种来源的信息为用户提供准确、全面的答案。
+
+## 检索到的相关信息
+{context}
+
+## 用户问题
+{query}
+
+## 请提供答案"""
             
             # 记录提示词信息
-            print(f"  📝 提示词构建完成: {len(context)}字符上下文")
             self.logger.info(f"提示词构建完成 - 上下文:{len(context)}字符, 总长度:{len(prompt)}字符")
             
             # 显示完整提示词
@@ -1549,20 +1573,31 @@ class AgenticXGraphRAGDemo:
             print(prompt)
             print("="*60)
             
-            # 调用 LLM 生成答案
-            print(f"\n🤖 正在生成答案...")
-            self.logger.info("开始调用大模型生成答案")
-            
-            response = await self.llm_client.ainvoke(prompt)
-            
-            # 记录和显示结果
-            self.logger.info(f"答案生成完成: {len(response.content)}字符")
-            
+            # 调用 LLM 生成答案（流式返回）
             print(f"\n🤖 AI 回答:")
             print("-" * 50)
+            self.logger.info("开始调用大模型生成答案")
             
-            # 直接输出答案，保持原有格式
-            print(response.content)
+            # 检查是否支持流式调用
+            if hasattr(self.llm_client, 'astream'):
+                # 使用流式调用
+                full_response = ""
+                async for chunk in self.llm_client.astream(prompt):
+                    if hasattr(chunk, 'content') and chunk.content:
+                        print(chunk.content, end='', flush=True)
+                        full_response += chunk.content
+                    elif isinstance(chunk, str):
+                        print(chunk, end='', flush=True)
+                        full_response += chunk
+                
+                print()  # 换行
+                self.logger.info(f"答案生成完成: {len(full_response)}字符")
+            else:
+                # 回退到非流式调用
+                response = await self.llm_client.ainvoke(prompt)
+                print(response.content)
+                self.logger.info(f"答案生成完成: {len(response.content)}字符")
+            
             print("-" * 50)
             
         except Exception as e:
