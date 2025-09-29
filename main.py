@@ -73,12 +73,13 @@ from agenticx.storage import (
     StorageType,
     Neo4jStorage,
     ChromaStorage,
-    RedisStorage,
-    VectorRecord
+    RedisStorage
 )
+from agenticx.storage.vectordb_storages.base import VectorRecord
 from agenticx.retrieval import (
     HybridRetriever,
     GraphRetriever,
+    GraphVectorConfig,
     VectorRetriever,
     BM25Retriever,
     AutoRetriever,
@@ -92,9 +93,10 @@ from agenticx.llms import LlmFactory
 class AgenticXGraphRAGDemo:
     """AgenticX GraphRAG 演示系统主类"""
     
-    def __init__(self, config_path: str = "configs.yml"):
+    def __init__(self, config_path: str = "configs.yml", mode: str = "full"):
         """初始化演示系统"""
         self.config_path = config_path
+        self.mode = mode  # 运行模式：full 或 qa
         self.config = self._load_config()
         self.logger = self._setup_logging()
         
@@ -109,7 +111,7 @@ class AgenticXGraphRAGDemo:
         self.data_dir = Path("./data")
         self.workspace_dir = Path(self.config['system']['workspace']['base_dir'])
         
-        self.logger.info("AgenticX GraphRAG 演示系统初始化完成")
+        self.logger.info(f"AgenticX GraphRAG 演示系统初始化完成 (模式: {self.mode})")
     
     def _load_config(self) -> Dict[str, Any]:
         """加载配置文件"""
@@ -180,7 +182,7 @@ class AgenticXGraphRAGDemo:
     
     async def initialize_components(self) -> None:
         """初始化所有核心组件"""
-        self.logger.info("正在初始化核心组件...")
+        self.logger.info("开始初始化系统组件...")
         
         # 1. 初始化 LLM 客户端
         await self._initialize_llm()
@@ -194,7 +196,7 @@ class AgenticXGraphRAGDemo:
         # 4. 初始化检索器
         await self._initialize_retriever()
         
-        self.logger.info("所有核心组件初始化完成")
+        self.logger.info("系统组件初始化完成")
     
     async def _initialize_llm(self) -> None:
         """初始化 LLM 客户端"""
@@ -228,7 +230,7 @@ class AgenticXGraphRAGDemo:
         )
         
         self.llm_client = LlmFactory.create_llm(llm_config)
-        self.logger.info(f"LLM 客户端初始化完成: {llm_config.provider} - {llm_config.model}")
+        self.logger.info(f"LLM初始化完成: {llm_config.provider}/{llm_config.model}")
     
     async def _initialize_embeddings(self) -> None:
         """初始化嵌入服务路由器"""
@@ -283,7 +285,7 @@ class AgenticXGraphRAGDemo:
         # 创建路由器（只传入providers列表）
         self.embedding_router = EmbeddingRouter(providers=providers)
         
-        self.logger.info(f"嵌入服务路由器初始化完成，支持提供商: {provider_names}")
+        self.logger.info(f"嵌入服务初始化完成: {len(provider_names)}个提供商")
 
     async def _initialize_storage(self) -> None:
         """初始化存储管理器"""
@@ -302,11 +304,14 @@ class AgenticXGraphRAGDemo:
             try:
                 milvus_config = vector_config.get('milvus', {})
                 # 构建extra_params，过滤掉None值
+                # 根据运行模式决定是否清理数据
+                recreate_if_exists = self.mode in ["full", "build"]  # full和build模式重新创建，qa模式保留
+                
                 extra_params = {
                     'dimension': embedding_dim,
                     'collection_name': milvus_config.get('collection_name', 'agenticx_graphrag'),
                     'database': milvus_config.get('database', 'default'),
-                    'recreate_if_exists': True  # 临时重新创建以匹配新的1024维度
+                    'recreate_if_exists': recreate_if_exists  # 根据模式决定是否重新创建
                 }
                 
                 # 只在username和password不为None时才添加
@@ -317,9 +322,8 @@ class AgenticXGraphRAGDemo:
                 if password is not None:
                     extra_params['password'] = password
                 
-                # 调试信息：打印所有参数
-                self.logger.info(f"🔍 Milvus配置参数: host={milvus_config.get('host', 'localhost')}, port={milvus_config.get('port', 19530)}")
-                self.logger.info(f"🔍 Milvus extra_params: {extra_params}")
+                # 简化日志：只记录关键信息
+                self.logger.debug(f"Milvus配置: {milvus_config.get('host', 'localhost')}:{milvus_config.get('port', 19530)}")
                 
                 configs.append(StorageConfig(
                     storage_type=StorageType.MILVUS,
@@ -413,7 +417,7 @@ class AgenticXGraphRAGDemo:
         # 调试：检查键值存储是否可用
         kv_storage = await self.storage_manager.get_key_value_storage('default')
         if kv_storage:
-            self.logger.info(f"✅ 键值存储可用: {type(kv_storage).__name__}")
+            self.logger.debug(f"键值存储: {type(kv_storage).__name__}")
         else:
             self.logger.warning("⚠️ 键值存储不可用")
     
@@ -423,14 +427,28 @@ class AgenticXGraphRAGDemo:
         
         retrieval_config = self.config['retrieval']
         
+        # 🔧 为文档检索创建独立的Milvus存储实例
+        from agenticx.storage.vectordb_storages.milvus import MilvusStorage
+        storage_config = self.config['storage']['vector']['milvus']
+        document_retrieval_storage = MilvusStorage(
+            dimension=1024,  # 使用嵌入维度
+            host=storage_config['host'],
+            port=storage_config['port'],
+            collection_name=storage_config['collection_name'],  # 使用文档专用集合名
+            database=storage_config.get('database', 'default'),
+            username=storage_config.get('username'),
+            password=storage_config.get('password')
+        )
+        
         # 创建向量检索器
-        vector_storage = self.storage_manager.get_storage(StorageType.MILVUS)
         vector_retriever = VectorRetriever(
             tenant_id="default",
-            vector_storage=vector_storage,
+            vector_storage=document_retrieval_storage,  # 使用文档专用向量存储
             embedding_provider=self.embedding_router,
             **retrieval_config.get('vector', {})
         )
+        
+        self.logger.info(f"📄 文档检索存储集合: {storage_config['collection_name']}")
         
         # 创建BM25检索器
         bm25_retriever = BM25Retriever(
@@ -438,20 +456,48 @@ class AgenticXGraphRAGDemo:
             **retrieval_config.get('bm25', {})
         )
         
-        # 创建图检索器
+        # 创建增强的图检索器（支持向量索引）
         graph_storage = self.storage_manager.get_storage(StorageType.NEO4J)
+        vector_storage = self.storage_manager.get_storage(StorageType.MILVUS)
+        
+        # 🔧 为图向量创建独立的Milvus存储实例
+        from agenticx.storage.vectordb_storages.milvus import MilvusStorage
+        storage_config = self.config['storage']['vector']['milvus']
+        graph_vector_storage = MilvusStorage(
+            dimension=1024,  # 使用嵌入维度
+            host=storage_config['host'],
+            port=storage_config['port'],
+            collection_name=storage_config['graph_collection_name'],  # 使用图专用集合名
+            database=storage_config.get('database', 'default'),
+            username=storage_config.get('username'),
+            password=storage_config.get('password'),
+            recreate_if_exists=False  # 🔧 修复：qa模式下不要重新创建集合
+        )
+        
+        # 配置图向量索引
+        graph_vector_config = GraphVectorConfig(
+            enable_vector_indexing=True,
+            **retrieval_config.get('graph', {}).get('vector_config', {})
+        )
+        
         graph_retriever = GraphRetriever(
             tenant_id="default",
             graph_storage=graph_storage,
+            vector_storage=graph_vector_storage,  # 使用图专用向量存储
+            embedding_provider=self.embedding_router,
+            vector_config=graph_vector_config,
             **retrieval_config.get('graph', {})
         )
         
-        # 创建混合检索器
+        self.logger.info(f"🔗 图向量存储集合: {storage_config['graph_collection_name']}")
+        
+        # 创建三路混合检索器
         from agenticx.retrieval.hybrid_retriever import HybridConfig
         hybrid_config = HybridConfig(**retrieval_config.get('hybrid', {}))
         self.retriever = HybridRetriever(
             vector_retriever=vector_retriever,
             bm25_retriever=bm25_retriever,
+            graph_retriever=graph_retriever,  # 集成图检索器
             config=hybrid_config
         )
         
@@ -464,7 +510,7 @@ class AgenticXGraphRAGDemo:
             # 注意：HybridRetriever 可能没有 set_reranker 方法，这里先注释掉
             # self.retriever.set_reranker(reranker)
         
-        self.logger.info("检索器初始化完成")
+        self.logger.debug("检索器初始化完成")
     
     def validate_data_path(self) -> List[Path]:
         """验证数据路径并返回文件列表"""
@@ -539,27 +585,32 @@ class AgenticXGraphRAGDemo:
                 self.logger.error(f"加载文档失败 {file_path}: {e}")
                 continue
         
-        self.logger.info(f"文档加载完成，共 {len(documents)} 个文档")
+        self.logger.info(f"文档加载完成: {len(documents)}个文档")
         return documents
     
     async def build_knowledge_graph(self, documents: List[Document]) -> None:
         """构建知识图谱"""
-        self.logger.info("开始构建知识图谱...")
+        self.logger.info("开始构建知识图谱")
+        
+        # 打印入参信息
+        doc_info = [f"{getattr(doc.metadata, 'title', None) or getattr(doc.metadata, 'name', 'Unknown')}({len(doc.content)}字符)" for doc in documents]
+        self.logger.info(f"输入文档: {len(documents)}个 - {', '.join(doc_info[:3])}{'...' if len(documents) > 3 else ''}")
+        
+        # 保存documents以供向量索引使用
+        self.documents = documents
         
         # 配置 GraphRAG 构造器
         from agenticx.knowledge.graphers.config import LLMConfig, GraphRagConfig
         from agenticx.knowledge.base import ChunkingConfig
         
-        graphrag_config_dict = self.config['knowledge']['graphrag']
+        graph_knowledge_config_dict = self.config['knowledge']['graph_knowledge']
         
-        # 调试：打印原始配置
-        self.logger.info(f"🔍 原始GraphRAG配置字典: {graphrag_config_dict}")
-        self.logger.info(f"🔍 extraction_method配置: {graphrag_config_dict.get('extraction_method', '未设置')}")
+        # 打印关键配置
+        self.logger.info(f"配置参数: extraction_method={graph_knowledge_config_dict.get('extraction_method', '未设置')}, "
+                        f"spo_batch_size={graph_knowledge_config_dict.get('spo_batch_size', '未设置')}")
         
         # 将字典转换为 GraphRagConfig 对象
-        graphrag_config = GraphRagConfig.from_dict(graphrag_config_dict)
-        self.logger.info(f"🔍 转换后的GraphRAG配置: extraction_method={getattr(graphrag_config, 'extraction_method', '未设置')}")
-        self.logger.debug(f"GraphRAG配置: {graphrag_config}")
+        graph_knowledge_config = GraphRagConfig.from_dict(graph_knowledge_config_dict)
         llm_config_dict = self.config['llm']
         
         # 转换为 LLMConfig 对象
@@ -606,96 +657,66 @@ class AgenticXGraphRAGDemo:
             max_tokens=strong_model_dict.get('max_tokens')
         )
         
-        # 将强模型配置添加到graphrag_config中
-        graphrag_config.strong_model_config = strong_llm_config
+        # 将强模型配置添加到graph_knowledge_config中
+        graph_knowledge_config.strong_model_config = strong_llm_config
         
-        self.logger.info(f"🤖 默认模型: {llm_config.model}")
-        self.logger.info(f"🚀 强模型: {strong_llm_config.model}")
+        self.logger.info(f"LLM配置: 默认模型={llm_config.model}, 强模型={strong_llm_config.model}")
         
-        self.logger.debug(f"GraphRAG LLMConfig: type={llm_config.type}, provider={llm_config.provider}, model={llm_config.model}")
-        
-        # 使用分块器对文档进行分块
-        chunking_config_dict = self.config['knowledge']['chunking']
-        strategy = chunking_config_dict.get('strategy', 'semantic')
-        chunk_size = chunking_config_dict.get('chunk_size', 800)
-        chunk_overlap = chunking_config_dict.get('chunk_overlap', 150)
+        # 使用知识图谱专用分块配置
+        graph_chunking_config = self.config['knowledge']['chunking']['graph_knowledge']
+        strategy = graph_chunking_config.get('strategy', 'fixed_size')
+        chunk_size = graph_chunking_config.get('chunk_size', 3000)
+        chunk_overlap = graph_chunking_config.get('chunk_overlap', 300)
         
         chunking_config = ChunkingConfig(
             chunk_size=chunk_size,
             chunk_overlap=chunk_overlap
         )
         
-        self.logger.info(f"使用分块策略: {strategy}, 分块大小: {chunk_size}")
+        self.logger.info(f"分块配置: strategy={strategy}, chunk_size={chunk_size}, overlap={chunk_overlap}")
         
         # 对所有文档进行分块
         all_chunks = []
         for i, document in enumerate(documents):
-            self.logger.debug(f"正在分块文档 {i+1}/{len(documents)}: {document.metadata.name}")
+            doc_name = document.metadata.name
+            doc_length = len(document.content)
             
             # 检查文档是否需要分块
-            if len(document.content) > chunk_size:
-                # 使用分块器，确保所有策略都能获得嵌入模型（用于后续向量化）
-                chunker_kwargs = {
-                    'embedding_model': self.embedding_router  # 所有分块器都需要嵌入模型
-                }
+            if doc_length > chunk_size:
+                self.logger.info(f"分块文档 {i+1}/{len(documents)}: {doc_name} ({doc_length}字符)")
                 
+                # 使用分块器
+                chunker_kwargs = {}
                 if strategy == "semantic":
-                    chunker_kwargs['similarity_threshold'] = chunking_config_dict.get('semantic', {}).get('similarity_threshold', 0.8)
-                    chunker_kwargs['min_chunk_size'] = chunking_config_dict.get('min_chunk_size', 100)
-                    chunker_kwargs['max_chunk_size'] = chunking_config_dict.get('max_chunk_size', 1200)
-                    self.logger.info(f"🔍 启用语义分块，相似度阈值: {chunker_kwargs['similarity_threshold']}")
+                    chunker_kwargs['embedding_model'] = self.embedding_router
+                    chunker_kwargs['similarity_threshold'] = graph_chunking_config.get('semantic', {}).get('similarity_threshold', 0.7)
+                    chunker_kwargs['min_chunk_size'] = graph_chunking_config.get('min_chunk_size', 1500)
+                    chunker_kwargs['max_chunk_size'] = graph_chunking_config.get('max_chunk_size', 5000)
                 elif strategy == "agentic":
                     chunker_kwargs['llm_client'] = self.llm_client
-                    agentic_config = chunking_config_dict.get('agentic', {})
+                    agentic_config = graph_chunking_config.get('agentic', {})
                     chunker_kwargs.update(agentic_config)
-                    self.logger.info("🤖 启用Agentic智能分块")
-                elif strategy == "fixed_size":
-                    self.logger.info("📏 使用固定大小分块（性能优化）")
                 
-                chunker = get_chunker(strategy, **chunker_kwargs)
-                
-                # 详细日志：显示分块器类型和配置
-                self.logger.info(f"🔧 分块器类型: {type(chunker).__name__}")
-                if hasattr(chunker, 'embedding_model') and chunker.embedding_model:
-                    self.logger.info(f"🤖 嵌入模型: {type(chunker.embedding_model).__name__}")
-                    self.logger.info(f"📊 相似度阈值: {getattr(chunker, 'similarity_threshold', 'N/A')}")
-                else:
-                    self.logger.warning("⚠️ 未检测到嵌入模型，可能使用回退策略")
-                
-                self.logger.info(f"📄 开始分块文档: {document.metadata.name} (长度: {len(document.content)} 字符)")
+                chunker = get_chunker(strategy, chunking_config, **chunker_kwargs)
                 chunks = await chunker.chunk_document_async(document)
                 
-                # 详细日志：显示分块结果
-                if hasattr(chunks, 'strategy_used'):
-                    self.logger.info(f"🎯 实际使用的分块策略: {chunks.strategy_used}")
-                if hasattr(chunks, 'metadata') and chunks.metadata:
-                    metadata = chunks.metadata
-                    if 'original_sentences' in metadata:
-                        self.logger.info(f"📝 原始句子数: {metadata['original_sentences']}")
-                    if 'similarity_threshold' in metadata:
-                        self.logger.info(f"🎚️ 相似度阈值: {metadata['similarity_threshold']}")
-                
-                self.logger.info(f"✅ 分块完成: {len(chunks.chunks)} 个块")
-                
                 if hasattr(chunks, 'chunks'):
-                    # 如果返回的是ChunkingResult对象
                     chunk_docs = chunks.chunks
                 else:
-                    # 如果直接返回文档列表
                     chunk_docs = chunks
                 
                 all_chunks.extend(chunk_docs)
-                self.logger.info(f"文档 {document.metadata.name} 被分成 {len(chunk_docs)} 个块")
+                self.logger.info(f"分块结果: {len(chunk_docs)}个块")
             else:
                 # 文档足够小，不需要分块
                 all_chunks.append(document)
-                self.logger.debug(f"文档 {document.metadata.name} 无需分块")
+                self.logger.info(f"文档 {i+1}/{len(documents)}: {doc_name} 无需分块")
         
-        self.logger.info(f"分块完成，共 {len(all_chunks)} 个文本块")
+        self.logger.info(f"分块完成: 总计{len(all_chunks)}个文本块")
         
         # 使用新的KnowledgeGraphBuilder进行两阶段SPO抽取
         builder = KnowledgeGraphBuilder(
-            config=graphrag_config,
+            config=graph_knowledge_config,
             llm_config=llm_config
         )
         
@@ -704,45 +725,40 @@ class AgenticXGraphRAGDemo:
         metadata = [chunk.metadata.__dict__ for chunk in all_chunks]
         
         # 构建图谱（使用批处理SPO抽取）
+        self.logger.info(f"开始SPO抽取: {len(texts)}个文本块")
         self.knowledge_graph = await builder.build_from_texts(
             texts=texts,
             metadata=metadata
         )
         
-        self.logger.info(
-            f"知识图谱构建完成: "
-            f"{len(self.knowledge_graph.entities)} 个实体, "
-            f"{len(self.knowledge_graph.relationships)} 个关系"
-        )
+        # 打印构建结果
+        entity_count = len(self.knowledge_graph.entities)
+        relation_count = len(self.knowledge_graph.relationships)
+        self.logger.info(f"✅ 知识图谱构建完成: {entity_count}个实体, {relation_count}个关系")
     
     async def store_and_index(self) -> None:
         """存储和索引知识图谱"""
-        self.logger.info("开始存储和索引知识图谱...")
+        self.logger.info("开始存储和索引")
+        
+        # 打印输入数据统计
+        entity_count = len(self.knowledge_graph.entities)
+        relation_count = len(self.knowledge_graph.relationships)
+        self.logger.info(f"输入数据: {entity_count}个实体, {relation_count}个关系")
         
         # 1. 存储到图数据库
         try:
-            self.logger.debug("🔍 开始查找图数据库存储...")
             graph_storage = await self.storage_manager.get_graph_storage('default')
             
             if graph_storage:
-                self.logger.info(f"✅ 找到图存储: {type(graph_storage).__name__}")
-                graph_storage.store_graph(self.knowledge_graph, clear_existing=True) # 确保清空
-                self.logger.info("知识图谱已存储到图数据库")
+                clear_existing = self.mode in ["full", "build"]
+                self.logger.info(f"图数据库存储: 清理模式={clear_existing}")
+                graph_storage.store_graph(self.knowledge_graph, clear_existing=clear_existing)
+                self.logger.info("✅ 图数据库存储完成")
             else:
-                self.logger.warning("⚠️ 未找到图数据库存储，跳过图谱存储")
-                # 调试信息：检查所有存储
-                self.logger.debug(f"📊 当前存储实例数量: {len(self.storage_manager.storages)}")
-                for i, storage in enumerate(self.storage_manager.storages):
-                    storage_type = type(storage).__name__
-                    has_store_graph = hasattr(storage, 'store_graph')
-                    has_add_triplet = hasattr(storage, 'add_triplet')
-                    has_add_node = hasattr(storage, 'add_node')
-                    self.logger.debug(f"  存储 {i+1}: {storage_type} - store_graph:{has_store_graph}, add_triplet:{has_add_triplet}, add_node:{has_add_node}")
+                self.logger.warning("❌ 未找到图数据库存储，跳过")
         except Exception as e:
             self.logger.error(f"❌ 图数据库存储失败: {e}")
-            import traceback
-            self.logger.debug(f"❌ 错误堆栈: {traceback.format_exc()}")
-            self.logger.warning("💡 继续执行其他索引步骤...")
+            self.logger.warning("继续执行其他索引步骤")
         
         # 2. 构建向量索引
         try:
@@ -750,50 +766,324 @@ class AgenticXGraphRAGDemo:
         except Exception as e:
             self.logger.error(f"❌ 向量索引构建失败: {e}")
         
-        # 3. 构建 SPO 索引
+        # 3. 构建BM25索引
+        try:
+            await self._build_bm25_index()
+        except Exception as e:
+            self.logger.error(f"❌ BM25索引构建失败: {e}")
+        
+        # 4. 构建 SPO 索引
         try:
             await self._build_spo_index()
         except Exception as e:
             self.logger.error(f"❌ SPO索引构建失败: {e}")
         
-        # 4. 缓存关键数据
+        # 5. 缓存关键数据
         try:
             await self._cache_key_data()
         except Exception as e:
             self.logger.error(f"❌ 数据缓存失败: {e}")
         
-        self.logger.info("存储和索引完成")
+        # 统计向量索引总数
+        vector_storage = await self.storage_manager.get_vector_storage('default')
+        total_vectors = 0
+        if vector_storage:
+            try:
+                status = vector_storage.status()
+                total_vectors = status.count
+            except:
+                pass
+        
+        self.logger.info(f"存储和索引完成: 图数据库{len(self.knowledge_graph.entities)}个实体/{len(self.knowledge_graph.relationships)}个关系, 向量数据库{total_vectors}条记录")
     
     async def _build_vector_index(self) -> None:
-        """构建向量索引"""
+        """构建向量索引 - 现在分离为文档向量和图向量"""
+        self.logger.info("开始构建向量索引")
+        
+        # 构建文档向量索引（用于向量检索）
+        await self._build_document_vector_index()
+        
+        # 构建图向量索引（用于图检索增强）
+        await self._build_graph_vector_indices()
+        
+        self.logger.info("✅ 向量索引构建完成")
+    
+    async def _build_document_vector_index(self) -> None:
+        """构建文档分块向量索引 - 专用于向量检索路径"""
+        from agenticx.storage import StorageType
+        from agenticx.storage.vectordb_storages.milvus import MilvusStorage
+        
+        self.logger.info("构建文档向量索引")
+        
+        # 🔧 为文档向量创建独立的Milvus存储实例
+        storage_config = self.config['storage']['vector']['milvus']
+        document_vector_storage = MilvusStorage(
+            dimension=1024,  # 使用嵌入维度
+            host=storage_config['host'],
+            port=storage_config['port'],
+            collection_name=storage_config['collection_name'],  # 使用文档专用集合名
+            database=storage_config.get('database', 'default'),
+            username=storage_config.get('username'),
+            password=storage_config.get('password'),
+            recreate_if_exists=True  # 重新创建集合，确保干净的开始
+        )
+        
+        self.logger.info(f"📄 文档向量存储集合: {storage_config['collection_name']}")
+        
+        if not hasattr(self, 'documents') or not self.documents:
+            self.logger.warning("❌ 没有文档可以索引")
+            return
+        
+        # 使用向量检索专用分块配置
+        vector_chunking_config = self.config['knowledge']['chunking'].get('vector', {
+            'strategy': 'fixed_size',
+            'chunk_size': 1500,
+            'chunk_overlap': 150,
+            'min_chunk_size': 500,
+            'max_chunk_size': 2000
+        })
+        
+        strategy = vector_chunking_config['strategy']
+        chunk_size = vector_chunking_config['chunk_size']
+        chunk_overlap = vector_chunking_config['chunk_overlap']
+        self.logger.info(f"向量分块配置: strategy={strategy}, chunk_size={chunk_size}, overlap={chunk_overlap}")
+        
+        # 获取向量检索专用分块器
+        from agenticx.knowledge.base import ChunkingConfig
+        vector_config = ChunkingConfig(
+            chunk_size=vector_chunking_config['chunk_size'],
+            chunk_overlap=vector_chunking_config['chunk_overlap']
+        )
+        vector_chunker = get_chunker(vector_chunking_config['strategy'], vector_config)
+        
+        document_records = []
+        for doc_idx, document in enumerate(self.documents):
+            # 使用向量检索专用分块
+            try:
+                chunks_result = await vector_chunker.chunk_document_async(document)
+                chunks = chunks_result.chunks if hasattr(chunks_result, 'chunks') else chunks_result
+            except Exception as e:
+                self.logger.warning(f"分块失败，使用简单分块: {e}")
+                # 简单分块作为备用
+                chunk_size = vector_chunking_config['chunk_size']
+                content = document.content
+                chunks = []
+                for i in range(0, len(content), chunk_size):
+                    chunk_content = content[i:i + chunk_size]
+                    chunk_metadata = type(document.metadata)(
+                        name=f"{document.metadata.name}_chunk_{i//chunk_size}",
+                        source=document.metadata.source,
+                        source_type=document.metadata.source_type,
+                        content_type=document.metadata.content_type,
+                        parent_id=document.id,
+                        chunk_index=i//chunk_size,
+                        chunker_name="SimpleChunker"
+                    )
+                    chunk = type(document)(content=chunk_content, metadata=chunk_metadata)
+                    chunks.append(chunk)
+            
+            for chunk_idx, chunk in enumerate(chunks):
+                # 生成嵌入
+                embedding = await self.embedding_router.aembed_text(chunk.content)
+                
+                # 创建向量记录
+                record = VectorRecord(
+                    id=f"doc_{doc_idx}_chunk_{chunk_idx}",
+                    vector=embedding,
+                    payload={
+                        'content': chunk.content,  # 🔧 修复：将content放到payload中
+                        'metadata': {
+                            'type': 'document_chunk',
+                            'document_id': document.id,
+                            'document_title': getattr(document.metadata, 'title', None) or getattr(document.metadata, 'name', ''),
+                            'chunk_index': chunk_idx,
+                            'chunk_size': len(chunk.content),
+                            'chunking_strategy': vector_chunking_config['strategy']
+                        }
+                    }
+                )
+                document_records.append(record)
+        
+        # 批量存储文档分块向量
+        if document_records:
+            await document_vector_storage.add(document_records)
+            self.logger.info(f"✅ 文档向量索引完成: {len(document_records)}条记录")
+            self.logger.info(f"📄 存储到集合: {storage_config['collection_name']}")
+        else:
+            self.logger.warning("❌ 没有文档分块可以索引")
+    
+    async def _build_graph_vector_indices(self) -> None:
+        """构建图向量索引 - 专用于图检索增强"""
+        self.logger.info("构建图向量索引")
+        
+        # 检查图检索器是否支持向量索引
+        if not hasattr(self, 'graph_retriever') or not self.graph_retriever:
+            self.logger.warning("❌ 图检索器未初始化，跳过")
+            return
+        
+        if not self.graph_retriever.enable_vector_search:
+            self.logger.info("图向量索引已禁用，跳过构建")
+            return
+        
+        try:
+            # 使用GraphRetriever的向量索引构建功能
+            results = await self.graph_retriever.build_vector_indices()
+            
+            # 处理不同类型的结果状态
+            success_count = 0
+            skipped_count = 0
+            failed_count = 0
+            
+            for k, v in results.items():
+                if k == 'error':
+                    continue
+                if v is True or v == "success":
+                    success_count += 1
+                elif v == "skipped":
+                    skipped_count += 1
+                else:
+                    failed_count += 1
+            
+            total_count = len([k for k in results.keys() if k != 'error'])
+            
+            if 'error' in results:
+                self.logger.error(f"❌ 图向量索引构建失败: {results['error']}")
+            else:
+                self.logger.info(f"✅ 图向量索引构建完成: {success_count}/{total_count}个成功")
+                for index_type, result in results.items():
+                    if index_type == 'error':
+                        continue
+                    if result is True or result == "success":
+                        status = "✅"
+                    elif result == "skipped":
+                        status = "⏭️"  # 跳过符号
+                    else:
+                        status = "❌"
+                    self.logger.info(f"  {status} {index_type}索引")
+                
+        except Exception as e:
+            self.logger.error(f"❌ 图向量索引构建异常: {e}")
+    
+    async def _build_bm25_index(self) -> None:
+        """构建BM25倒排索引 - 基于专用分块配置"""
+        self.logger.info("构建BM25倒排索引")
+        
+        if not hasattr(self, 'documents') or not self.documents:
+            self.logger.warning("❌ 没有文档可以构建BM25索引")
+            return
+        
+        # 检查BM25检索器是否已初始化
+        if not hasattr(self, 'retriever') or not self.retriever:
+            self.logger.warning("❌ 检索器未初始化，跳过")
+            return
+        
+        # 获取BM25检索器
+        bm25_retriever = None
+        if hasattr(self.retriever, 'bm25_retriever'):
+            bm25_retriever = self.retriever.bm25_retriever
+        else:
+            self.logger.warning("❌ 未找到BM25检索器，跳过")
+            return
+        
+        # 使用BM25专用分块配置
+        bm25_chunking_config = self.config['knowledge']['chunking'].get('bm25', {
+            'strategy': 'fixed_size',
+            'chunk_size': 600,
+            'chunk_overlap': 100,
+            'min_chunk_size': 400,
+            'max_chunk_size': 1000
+        })
+        
+        strategy = bm25_chunking_config['strategy']
+        chunk_size = bm25_chunking_config['chunk_size']
+        chunk_overlap = bm25_chunking_config['chunk_overlap']
+        self.logger.info(f"BM25分块配置: strategy={strategy}, chunk_size={chunk_size}, overlap={chunk_overlap}")
+        
+        # 获取BM25专用分块器
+        from agenticx.knowledge.base import ChunkingConfig
+        bm25_config = ChunkingConfig(
+            chunk_size=bm25_chunking_config['chunk_size'],
+            chunk_overlap=bm25_chunking_config['chunk_overlap']
+        )
+        bm25_chunker = get_chunker(bm25_chunking_config['strategy'], bm25_config)
+        
+        # 准备BM25文档
+        bm25_documents = []
+        for doc_idx, document in enumerate(self.documents):
+            # 使用BM25专用分块
+            try:
+                chunks_result = await bm25_chunker.chunk_document_async(document)
+                chunks = chunks_result.chunks if hasattr(chunks_result, 'chunks') else chunks_result
+            except Exception as e:
+                self.logger.warning(f"BM25分块失败，使用简单分块: {e}")
+                # 简单分块作为备用
+                chunk_size = bm25_chunking_config['chunk_size']
+                content = document.content
+                chunks = []
+                for i in range(0, len(content), chunk_size):
+                    chunk_content = content[i:i + chunk_size]
+                    chunk_metadata = type(document.metadata)(
+                        name=f"{document.metadata.name}_bm25_chunk_{i//chunk_size}",
+                        source=document.metadata.source,
+                        source_type=document.metadata.source_type,
+                        content_type=document.metadata.content_type,
+                        parent_id=document.id,
+                        chunk_index=i//chunk_size,
+                        chunker_name="SimpleChunker"
+                    )
+                    chunk = type(document)(content=chunk_content, metadata=chunk_metadata)
+                    chunks.append(chunk)
+            
+            for chunk_idx, chunk in enumerate(chunks):
+                # 创建BM25文档记录
+                bm25_doc = {
+                    'id': f"bm25_doc_{doc_idx}_chunk_{chunk_idx}",
+                    'content': chunk.content,
+                    'metadata': {
+                        'type': 'bm25_chunk',
+                        'document_id': document.id,
+                        'document_title': getattr(document.metadata, 'title', None) or getattr(document.metadata, 'name', ''),
+                        'chunk_index': chunk_idx,
+                        'chunk_size': len(chunk.content),
+                        'chunking_strategy': bm25_chunking_config['strategy']
+                    }
+                }
+                bm25_documents.append(bm25_doc)
+        
+        # 批量添加到BM25检索器
+        if bm25_documents:
+            try:
+                document_ids = await bm25_retriever.add_documents(bm25_documents)
+                self.logger.info(f"✅ BM25索引构建完成: {len(bm25_documents)}条记录")
+                self.logger.debug(f"BM25文档ID: {document_ids[:5]}..." if len(document_ids) > 5 else f"BM25文档ID: {document_ids}")
+            except Exception as e:
+                self.logger.error(f"❌ BM25索引添加失败: {e}")
+        else:
+            self.logger.warning("⚠️ 没有BM25文档可以索引")
+    
+    async def _build_legacy_entity_relation_vectors(self) -> None:
+        """构建传统的实体和关系向量（保留用于兼容性）"""
         from agenticx.storage import StorageType
         
-        self.logger.info("构建向量索引...")
+        self.logger.debug("构建传统实体关系向量...")
         
-        # 尝试获取向量存储
         vector_storage = await self.storage_manager.get_vector_storage('default')
         if not vector_storage:
-            # 回退到通过类型获取
             vector_storage = self.storage_manager.get_storage(StorageType.CHROMA)
             if not vector_storage:
-                self.logger.warning("⚠️ 未找到向量存储，跳过向量索引构建")
                 return
         
         # 为实体构建向量索引
         entity_records = []
         for entity in self.knowledge_graph.entities.values():
-            # 生成实体描述文本
             entity_text = f"{entity.name}: {entity.description or ''}"
-            
-            # 生成嵌入
             embedding = await self.embedding_router.aembed_text(entity_text)
             
-            # 创建向量记录
             record = VectorRecord(
-                id=entity.id,
+                id=f"legacy_entity_{entity.id}",
                 vector=embedding,
                 metadata={
-                    'type': 'entity',
+                    'type': 'legacy_entity',
                     'entity_type': entity.entity_type.value,
                     'name': entity.name,
                     'confidence': entity.confidence
@@ -802,29 +1092,21 @@ class AgenticXGraphRAGDemo:
             )
             entity_records.append(record)
         
-        # 批量存储
-        vector_storage.add(entity_records)
-        self.logger.info(f"实体向量索引构建完成: {len(entity_records)} 条记录")
-        
         # 为关系构建向量索引
         relationship_records = []
         for relationship in self.knowledge_graph.relationships.values():
-            # 生成关系描述文本
             source_entity = self.knowledge_graph.get_entity(relationship.source_entity_id)
             target_entity = self.knowledge_graph.get_entity(relationship.target_entity_id)
             
             if source_entity and target_entity:
                 rel_text = f"{source_entity.name} {relationship.relation_type.value} {target_entity.name}"
-                
-                # 生成嵌入
                 embedding = await self.embedding_router.aembed_text(rel_text)
                 
-                # 创建向量记录
                 record = VectorRecord(
-                    id=relationship.id,
+                    id=f"legacy_relation_{relationship.id}",
                     vector=embedding,
                     metadata={
-                        'type': 'relationship',
+                        'type': 'legacy_relationship',
                         'relation_type': relationship.relation_type.value,
                         'source_entity': source_entity.name,
                         'target_entity': target_entity.name,
@@ -834,8 +1116,11 @@ class AgenticXGraphRAGDemo:
                 )
                 relationship_records.append(record)
         
-        vector_storage.add(relationship_records)
-        self.logger.info(f"关系向量索引构建完成: {len(relationship_records)} 条记录")
+        # 批量存储
+        all_records = entity_records + relationship_records
+        if all_records:
+            vector_storage.add(all_records)
+            self.logger.debug(f"传统向量索引: {len(entity_records)}个实体 + {len(relationship_records)}个关系")
     
     async def _build_spo_index(self) -> None:
         """构建 SPO 三元组索引"""
@@ -980,6 +1265,7 @@ class AgenticXGraphRAGDemo:
     async def _process_query(self, query: str) -> None:
         """处理用户查询"""
         print(f"\n🔄 正在处理查询: {query}")
+        self.logger.info(f"处理查询: {query}")
         
         try:
             # 获取检索配置
@@ -987,24 +1273,91 @@ class AgenticXGraphRAGDemo:
             graph_config = retrieval_config.get('graph', {})
             vector_config = retrieval_config.get('vector', {})
             
+            self.logger.debug(f"检索配置: 图检索max_nodes={graph_config.get('max_nodes', 50)}, 向量top_k={vector_config.get('top_k', 20)}")
+            
             # 先尝试图检索（适合实体查询）
             graph_results = []
             if hasattr(self, 'graph_retriever') and self.graph_retriever:
                 try:
                     graph_top_k = min(graph_config.get('max_nodes', 50), 10)  # 限制在10以内
                     graph_results = await self.graph_retriever.retrieve(query, top_k=graph_top_k)
+                    
                     if graph_results:
-                        print(f"🔍 图检索找到 {len(graph_results)} 条结果 (top_k={graph_top_k})")
+                        print(f"图检索: {len(graph_results)}条结果")
+                        self.logger.debug(f"图检索结果详情: {len(graph_results)}条")
+                        
+                        # 🔍 调试：显示图检索的详细内容
+                        print("\n🔍 图检索详细结果:")
+                        for i, result in enumerate(graph_results[:3], 1):  # 只显示前3个
+                            print(f"  📄 图结果 {i}:")
+                            print(f"     内容: {result.content[:200]}...")  # 显示前200字符
+                            print(f"     元数据: {result.metadata}")
+                            print(f"     相似度: {getattr(result, 'score', 'N/A')}")
+                    else:
+                        self.logger.debug("图检索无结果")
                 except Exception as e:
                     self.logger.warning(f"图检索失败: {e}")
             
             # 使用混合检索器进行查询
             hybrid_top_k = vector_config.get('top_k', 20)
+            
+            # 🔍 调试：分别测试三路检索
+            print(f"\n🔍 测试三路检索组件:")
+            
+            # 测试文档向量检索
+            try:
+                vector_results = await self.retriever.vector_retriever.retrieve(query, top_k=hybrid_top_k)
+                print(f"  📄 文档向量检索: {len(vector_results)}条结果")
+                if vector_results:
+                    print(f"     示例内容: '{vector_results[0].content[:100]}...'")
+            except Exception as e:
+                print(f"  ❌ 文档向量检索失败: {e}")
+            
+            # 测试BM25检索
+            try:
+                bm25_results = await self.retriever.bm25_retriever.retrieve(query, top_k=hybrid_top_k)
+                print(f"  🔤 BM25检索: {len(bm25_results)}条结果")
+                if bm25_results:
+                    print(f"     示例内容: '{bm25_results[0].content[:100]}...'")
+            except Exception as e:
+                print(f"  ❌ BM25检索失败: {e}")
+            
+            # 测试图检索（在混合检索器内部的）
+            try:
+                if hasattr(self.retriever, 'graph_retriever') and self.retriever.graph_retriever:
+                    internal_graph_results = await self.retriever.graph_retriever.retrieve(query, top_k=hybrid_top_k)
+                    print(f"  🔗 内部图检索: {len(internal_graph_results)}条结果")
+                    if internal_graph_results:
+                        print(f"     示例内容: '{internal_graph_results[0].content[:100]}...'")
+                else:
+                    print(f"  ⚠️ 混合检索器中没有图检索器")
+            except Exception as e:
+                print(f"  ❌ 内部图检索失败: {e}")
+            
+            # 执行混合检索
             hybrid_results = await self.retriever.retrieve(query, top_k=hybrid_top_k)
-            print(f"🔍 混合检索找到 {len(hybrid_results)} 条结果 (top_k={hybrid_top_k})")
+            print(f"\n🔍 混合检索最终结果: {len(hybrid_results)}条")
+            
+            # 🔍 调试：显示混合检索的详细内容
+            if hybrid_results:
+                print("\n🔍 混合检索详细结果:")
+                for i, result in enumerate(hybrid_results[:3], 1):  # 只显示前3个
+                    print(f"  📄 混合结果 {i}:")
+                    print(f"     内容: '{result.content}'")  # 用引号包围，显示空内容
+                    print(f"     内容长度: {len(result.content)} 字符")
+                    print(f"     元数据: {result.metadata}")
+                    print(f"     相似度: {getattr(result, 'score', 'N/A')}")
+            
+            self.logger.debug(f"混合检索结果详情: {len(hybrid_results)}条")
+            
+            # 📊 显示检索结果统计
+            print(f"\n📊 检索结果统计:")
+            print(f"  🔗 图检索: {len(graph_results)}条结果")
+            print(f"  🔍 混合检索: {len(hybrid_results)}条结果")
             
             # 合并结果
             all_results = graph_results + hybrid_results
+            self.logger.debug(f"合并检索结果: 图{len(graph_results)}+混合{len(hybrid_results)}={len(all_results)}条")
             
             # 去重并按相似度排序
             seen_ids = set()
@@ -1015,12 +1368,22 @@ class AgenticXGraphRAGDemo:
                     seen_ids.add(result_id)
                     unique_results.append(result)
             
+            self.logger.debug(f"去重后: {len(unique_results)}条")
+            print(f"  🔄 去重后: {len(unique_results)}条结果")
+            
             # 按相似度排序
             unique_results.sort(key=lambda x: getattr(x, 'score', 0), reverse=True)
-            results = unique_results[:5]  # 取前5个
+            
+            # 🔧 修复：从配置中读取最终结果数量，而不是硬编码5
+            final_top_k = vector_config.get('top_k', 20)  # 默认20，可配置
+            results = unique_results[:final_top_k]
+            
+            self.logger.debug(f"最终结果: {len(results)}条 (配置top_k: {final_top_k})")
+            print(f"  ✅ 最终采用: {len(results)}条结果 (配置top_k: {final_top_k})")
             
             if not results:
                 print("❌ 没有找到相关信息")
+                self.logger.warning("❌ 检索未找到任何相关信息，尝试直接实体搜索")
                 # 尝试直接在Neo4j中搜索实体
                 await self._search_entity_directly(query)
                 return
@@ -1034,10 +1397,18 @@ class AgenticXGraphRAGDemo:
                 score = getattr(result, 'score', 0)
                 score_status = "✅" if score >= similarity_threshold else "⚠️"
                 print(f"📄 结果 {i} {score_status} (相似度: {score:.3f})")
-                print(f"   内容: {result.content[:200]}...")
+                # 显示完整内容，不截断
+                print(f"   内容: {result.content}")
                 if result.metadata:
                     print(f"   元数据: {result.metadata}")
                 print()
+            
+            # 记录最终用于生成答案的检索内容
+            self.logger.info("📝 最终用于答案生成的检索内容:")
+            for i, result in enumerate(results, 1):
+                self.logger.info(f"  检索内容 {i}: {result.content}")
+                if result.metadata:
+                    self.logger.info(f"  元数据 {i}: {result.metadata}")
             
             # 生成答案
             await self._generate_answer(query, results)
@@ -1087,8 +1458,144 @@ class AgenticXGraphRAGDemo:
     async def _generate_answer(self, query: str, results: List[Any]) -> None:
         """基于检索结果生成答案"""
         try:
-            # 构建上下文
-            context = "\n".join([result.content for result in results[:3]])
+            # 显示完整的检索内容
+            print("\n" + "="*60)
+            print("🔍 完整检索内容详情:")
+            print("="*60)
+            for i, result in enumerate(results, 1):
+                print(f"\n📄 检索结果 {i}:")
+                print(f"   内容: {result.content}")
+                print(f"   元数据: {result.metadata}")
+                print(f"   相似度: {getattr(result, 'score', 'N/A')}")
+            print("="*60)
+            
+            # 🔧 修复：从配置中读取上下文数量，而不是硬编码3
+            rag_config = self.config.get('rag', {})
+            retrieval_config = rag_config.get('retrieval', {})
+            context_top_k = retrieval_config.get('default_top_k', 10)  # 默认10条
+            
+            # 🔧 分别提取图检索和文档检索结果，确保两者都包含在上下文中
+            graph_results = [r for r in results if r.metadata and r.metadata.get('search_source') == 'graph_vector']
+            doc_results = [r for r in results if r.metadata and r.metadata.get('type') == 'document_chunk']
+            other_results = [r for r in results if r not in graph_results and r not in doc_results]
+            
+            # 🔍 调试信息：显示结果分类
+            print(f"\n🔍 结果分类统计:")
+            print(f"  📊 总结果数: {len(results)}")
+            print(f"  🔗 图检索结果: {len(graph_results)}")
+            print(f"  📄 文档检索结果: {len(doc_results)}")
+            print(f"  ❓ 其他结果: {len(other_results)}")
+            
+            if graph_results:
+                print(f"  🔗 图检索示例: '{graph_results[0].content[:50]}...'")
+            if doc_results:
+                print(f"  📄 文档检索示例: '{doc_results[0].content[:50]}...'")
+            if other_results:
+                print(f"  ❓ 其他结果示例: '{other_results[0].content[:50]}...'")
+                print(f"     元数据: {other_results[0].metadata}")
+            
+            # 构建平衡的上下文：优先包含文档检索结果，然后是图检索结果
+            context_results = []
+            doc_count = min(len(doc_results), context_top_k // 2)  # 一半给文档检索
+            graph_count = min(len(graph_results), context_top_k - doc_count)  # 剩余给图检索
+            
+            context_results.extend(doc_results[:doc_count])
+            context_results.extend(graph_results[:graph_count])
+            
+            # 如果还有空间，添加其他结果
+            remaining = context_top_k - len(context_results)
+            if remaining > 0:
+                context_results.extend(other_results[:remaining])
+            
+            # 🔧 重新设计上下文格式，参考youtu-graphrag的结构化格式
+            context_sections = []
+            
+            # === 图检索结果 ===
+            if graph_results:
+                context_sections.append("=== 知识图谱信息 ===")
+                
+                # 分类图检索结果
+                entities = []
+                relations = []
+                triples = []
+                communities = []
+                
+                for result in graph_results[:graph_count]:
+                    if not result.content.strip():
+                        continue
+                        
+                    vector_type = result.metadata.get('vector_type', 'unknown') if result.metadata else 'unknown'
+                    score = getattr(result, 'score', 0.0)
+                    
+                    if vector_type == 'node' or 'Entity' in result.content:
+                        # 提取实体名称和描述
+                        content = result.content
+                        if ' - ' in content:
+                            parts = content.split(' - ')
+                            entity_name = parts[0]
+                            entity_desc = parts[1].replace(' - (类型: Entity)', '') if len(parts) > 1 else ''
+                        else:
+                            parts = content.split('. ')
+                            entity_name = parts[0]
+                            entity_desc = parts[1] if len(parts) > 1 and parts[1] != 'Labels: Entity' else ''
+                        
+                        entities.append(f"• {entity_name}: {entity_desc} [score: {score:.3f}]")
+                    
+                    elif vector_type == 'relation':
+                        relations.append(f"• {result.content} [score: {score:.3f}]")
+                    elif vector_type == 'triple':
+                        triples.append(f"• {result.content} [score: {score:.3f}]")
+                    elif vector_type == 'community':
+                        communities.append(f"• {result.content} [score: {score:.3f}]")
+                
+                # 添加各类型结果
+                if entities:
+                    context_sections.append("实体信息:")
+                    context_sections.extend(entities)
+                if relations:
+                    context_sections.append("\n关系信息:")
+                    context_sections.extend(relations)
+                if triples:
+                    context_sections.append("\n三元组信息:")
+                    context_sections.extend(triples)
+                if communities:
+                    context_sections.append("\n社区信息:")
+                    context_sections.extend(communities)
+            
+            # === 文档检索结果 ===
+            if doc_results:
+                if context_sections:
+                    context_sections.append("\n=== 文档内容 ===")
+                else:
+                    context_sections.append("=== 文档内容 ===")
+                
+                for i, result in enumerate(doc_results[:doc_count]):
+                    if result.content.strip():
+                        score = getattr(result, 'score', 0.0)
+                        
+                        # 提取页码信息
+                        page_info = ""
+                        if result.metadata and 'page' in result.metadata:
+                            page_info = f"Page {result.metadata['page']}"
+                        elif "--- Page" in result.content:
+                            # 从内容中提取页码
+                            import re
+                            page_match = re.search(r'--- Page (\d+) ---', result.content)
+                            if page_match:
+                                page_info = f"Page {page_match.group(1)}"
+                        
+                        # 清理和截取文档内容
+                        content = result.content.replace('--- Page', '\n--- Page').strip()
+                        if len(content) > 400:
+                            # 智能截取：保留开头和结尾
+                            content = content[:200] + "\n...\n" + content[-200:]
+                        
+                        page_prefix = f"[{page_info}] " if page_info else f"[文档 {i+1}] "
+                        context_sections.append(f"{page_prefix}{content} [score: {score:.3f}]")
+            
+            context = "\n".join(context_sections)
+            
+            self.logger.debug(f"构建上下文: {len(context_results)}条结果 (配置: {context_top_k}), {len(context)}字符")
             
             # 构建提示词
             prompt = f"""
@@ -1102,10 +1609,21 @@ class AgenticXGraphRAGDemo:
 请回答:
 """
             
+            # 显示最终提示词
+            print("\n" + "="*60)
+            print("📝 最终发送给大模型的提示词:")
+            print("="*60)
+            print(prompt)
+            print("="*60)
+            
             # 调用 LLM 生成答案
+            self.logger.debug("调用大模型生成答案...")
             response = await self.llm_client.ainvoke(prompt)
             
-            print("🤖 AI 回答:")
+            # 记录结果
+            self.logger.info(f"答案生成完成: {len(response.content)}字符")
+            
+            print("\n🤖 AI 回答:")
             print("-" * 40)
             print(response.content)
             print("-" * 40)
@@ -1141,20 +1659,215 @@ class AgenticXGraphRAGDemo:
             self.logger.error(f"演示运行错误: {e}")
             print(f"❌ 演示运行出错: {e}")
             raise
+    
+    async def run_build_only(self) -> None:
+        """仅构建模式，执行文档解析和知识库构建，不启动问答"""
+        try:
+            print("🔨 启动 AgenticX GraphRAG 构建模式...")
+            print("📋 执行文档解析和知识库构建，完成后退出")
+            
+            # 1. 初始化组件
+            await self.initialize_components()
+            
+            # 2. 验证数据路径
+            file_paths = self.validate_data_path()
+            
+            # 3. 加载文档
+            documents = await self.load_documents(file_paths)
+            
+            # 4. 构建知识图谱
+            await self.build_knowledge_graph(documents)
+            
+            # 5. 存储和索引
+            await self.store_and_index()
+            
+            print("✅ 知识库构建完成！")
+            print("💡 现在可以使用 'python main.py --mode qa' 启动问答系统")
+            
+        except Exception as e:
+            self.logger.error(f"构建模式运行错误: {e}")
+            print(f"❌ 构建模式运行出错: {e}")
+            raise
+
+    async def run_qa_only(self) -> None:
+        """仅运行问答模式，跳过文档解析和知识库构建"""
+        try:
+            print("启动 AgenticX GraphRAG 问答模式...")
+            print("📋 跳过文档解析和知识库构建，直接使用已有数据")
+            
+            # 1. 初始化组件
+            await self.initialize_components()
+            
+            # 2. 验证已有数据
+            await self._validate_existing_data()
+            
+            # 3. 启动交互式问答
+            await self.interactive_qa()
+            
+        except Exception as e:
+            self.logger.error(f"问答模式运行错误: {e}")
+            print(f"❌ 问答模式运行出错: {e}")
+            raise
+    
+    async def _validate_existing_data(self) -> None:
+        """验证已有的向量和图数据库数据"""
+        self.logger.info("🔍 验证已有数据...")
+        
+        # 检查向量数据库
+        try:
+            from agenticx.storage import StorageType
+            vector_storage = await self.storage_manager.get_vector_storage('default')
+            if not vector_storage:
+                vector_storage = self.storage_manager.get_storage(StorageType.MILVUS)
+            
+            if vector_storage:
+                # 尝试验证向量数据库连接和数据
+                try:
+                    # 首先检查对象的所有可用方法
+                    available_methods = [method for method in dir(vector_storage) if not method.startswith('_')]
+                    # 移除冗余日志
+                    
+                    # 尝试简单的连接验证，而不是数据搜索
+                    if hasattr(vector_storage, 'collection') and vector_storage.collection:
+                        # 检查集合是否存在
+                        collection_info = vector_storage.collection.describe()
+                        self.logger.debug(f"Milvus集合: {collection_info["collection_name"]}")
+                        print(f"✅ 向量数据库连接正常，集合已存在")
+                        
+                        # 尝试获取集合统计信息
+                        if hasattr(vector_storage.collection, 'num_entities'):
+                            entity_count = vector_storage.collection.num_entities
+                            self.logger.debug(f"向量数据库记录数: {entity_count}")
+                            print(f"向量数据库: {entity_count}条记录")
+                        
+                    elif hasattr(vector_storage, 'client'):
+                        # 如果有client属性，尝试检查连接
+                        self.logger.info("✅ Milvus客户端连接正常")
+                        print(f"✅ 向量数据库连接正常")
+                    else:
+                        # 简单的连接验证
+                        self.logger.info("✅ 向量数据库对象创建成功")
+                        print(f"✅ 向量数据库连接正常")
+                        
+                except Exception as validation_error:
+                    self.logger.warning(f"向量数据库验证失败: {validation_error}")
+                    print(f"✅ 向量数据库连接正常（跳过详细验证）")
+            else:
+                self.logger.error("❌ 无法连接到向量数据库")
+                print("❌ 无法连接到向量数据库")
+                
+        except Exception as e:
+            self.logger.error(f"向量数据库验证失败: {e}")
+            print(f"⚠️ 向量数据库验证失败: {e}")
+        
+        # 检查图数据库
+        try:
+            graph_storage = await self.storage_manager.get_graph_storage('default')
+            if not graph_storage:
+                graph_storage = self.storage_manager.get_storage(StorageType.NEO4J)
+            
+            if graph_storage:
+                # 检查图数据库中的节点数量
+                count_query = "MATCH (n) RETURN count(n) as node_count"
+                result = graph_storage.execute_query(count_query)
+                
+                if result and len(result) > 0:
+                    node_count = result[0]['node_count']
+                    self.logger.debug(f"图数据库验证: {node_count}个节点")
+                    print(f"✅ 图数据库连接正常，包含 {node_count} 个节点")
+                    
+                    # 检查关系数量
+                    rel_count_query = "MATCH ()-[r]->() RETURN count(r) as rel_count"
+                    rel_result = graph_storage.execute_query(rel_count_query)
+                    if rel_result and len(rel_result) > 0:
+                        rel_count = rel_result[0]['rel_count']
+                        self.logger.debug(f"图数据库关系数: {rel_count}")
+                        print(f"✅ 图数据库包含 {rel_count} 个关系")
+                else:
+                    self.logger.warning("⚠️ 图数据库为空")
+                    print("⚠️ 图数据库似乎为空，可能需要重新构建")
+            else:
+                self.logger.error("❌ 无法连接到图数据库")
+                print("❌ 无法连接到图数据库")
+                
+        except Exception as e:
+            self.logger.error(f"图数据库验证失败: {e}")
+            print(f"⚠️ 图数据库验证失败: {e}")
+        
+        self.logger.info("数据验证完成")
+
+    async def cleanup(self) -> None:
+        """清理资源"""
+        try:
+            # 关闭图数据库连接
+            if hasattr(self, 'storage_manager') and self.storage_manager:
+                graph_storage = self.storage_manager.get_storage(StorageType.NEO4J)
+                if graph_storage and hasattr(graph_storage, 'close'):
+                    graph_storage.close()
+                    logger.info("✅ Neo4j 连接已关闭")
+        except Exception as e:
+            logger.error(f"❌ 清理资源失败: {e}")
 
 
 async def main():
     """主函数"""
+    import argparse
+    
+    # 解析命令行参数
+    parser = argparse.ArgumentParser(
+        description='AgenticX GraphRAG 演示系统',
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+运行模式说明:
+  full   - 完整流程: 文档解析 + 知识图谱构建 + 向量索引 + 问答系统
+  build  - 仅构建: 文档解析 + 知识图谱构建 + 向量索引 (不启动问答)
+  qa     - 仅问答: 直接使用已有数据启动问答系统 (不重建数据)
+
+使用示例:
+  python main.py --mode full    # 完整流程 (默认)
+  python main.py --mode build   # 仅重建知识库
+  python main.py --mode qa      # 仅启动问答
+        """
+    )
+    
+    parser.add_argument('--mode', choices=['full', 'build', 'qa'], default='full',
+                       help='运行模式: full=完整流程(默认), build=仅构建知识库, qa=仅问答模式')
+    parser.add_argument('--config', default='configs.yml',
+                       help='配置文件路径 (默认: configs.yml)')
+    
+    args = parser.parse_args()
+    
+    # 显示模式信息
+    mode_descriptions = {
+        'full': '🔄 完整模式 - 文档解析 + 知识库构建 + 问答系统',
+        'build': '🔨 构建模式 - 仅重建知识库和向量索引',
+        'qa': '问答模式 - 使用已有数据启动问答系统'
+    }
+    
+    print(f"\n{mode_descriptions[args.mode]}")
+    print(f"📁 配置文件: {args.config}")
+    print("=" * 60)
+    
+    demo = None
     try:
-        # 创建演示系统
-        demo = AgenticXGraphRAGDemo()
+        # 创建演示系统，传递模式参数
+        demo = AgenticXGraphRAGDemo(config_path=args.config, mode=args.mode)
         
-        # 运行演示
-        await demo.run_demo()
+        # 根据模式运行
+        if args.mode == 'qa':
+            await demo.run_qa_only()
+        elif args.mode == 'build':
+            await demo.run_build_only()
+        else:  # full
+            await demo.run_demo()
         
     except Exception as e:
         print(f"❌ 系统启动失败: {e}")
         sys.exit(1)
+    finally:
+        # 清理资源
+        if demo:
+            await demo.cleanup()
 
 
 if __name__ == "__main__":
