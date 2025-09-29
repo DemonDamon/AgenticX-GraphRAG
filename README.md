@@ -354,11 +354,11 @@ git clone https://github.com/DemonDamon/AgenticX-GraphRAG.git
 cd AgenticX-GraphRAG
 
 # 使用anaconda创建虚拟环境
-conda create -n agenticx_graphrag python=3.10 -y
+conda create -n agenticx_graphrag python=3.11 -y
 conda activate agenticx_graphrag
 
 # 🔧 安装AgenticX框架（必需）
-pip install agenticx -i https://pypi.org/simple/
+pip install agenticx==0.1.3 -i https://pypi.org/simple/
 
 # 安装项目依赖
 pip install -r requirements.txt
@@ -467,15 +467,71 @@ python main.py
 `configs.yml` 包含了系统的完整配置，采用模块化设计：
 
 #### 1. LLM配置
+
+本系统采用**分层模型策略**，针对不同任务的复杂度和性能要求，选择最适合的模型：
+
+##### 🧠 强模型配置 - Schema生成阶段
 ```yaml
 llm:
-  provider: "bailian"        # 推荐使用百炼
-  model: "qwen-turbo"       # 稳定快速的模型
-  temperature: 0.1          # 低温度保证稳定性
-  max_tokens: 2048          # 适中的token数
-  timeout: 180              # 3分钟超时
-  retry_attempts: 5         # 重试5次
+  strong_model:
+    provider: "bailian"
+    model: "qwen3-max"        # 万亿参数旗舰模型
+    temperature: 0.1          # 低温度确保稳定输出
+    max_tokens: 128000        # 128k上下文长度
+    timeout: 600              # 10分钟超时，处理大文档
 ```
+
+**为什么选择 Qwen3-Max？** <mcreference link="https://www.iplaysoft.com/qwen.html" index="2">2</mcreference> <mcreference link="https://www.cnblogs.com/sing1ee/p/19108560/qwen3-max" index="4">4</mcreference>
+
+- **🚀 顶级推理能力**: 超过1万亿参数，36T tokens预训练数据，在LMArena文本排行榜稳居全球前三
+- **📊 强大分析能力**: 在代码、数学、通用能力等基准测试中与GPT-5、Claude Opus 4等顶级模型相当
+- **🔍 深度理解**: 特别适合文档分析、领域识别、Schema生成等需要深度理解的任务
+- **🌍 多语言支持**: 支持119种语言及方言，适合处理多语言文档
+- **🧠 稳定训练**: MoE架构设计，训练过程稳定，没有loss尖刺
+
+##### ⚡ 轻量模型配置 - SPO抽取阶段
+```yaml
+llm:
+  light_model:
+    provider: "bailian"
+    model: "qwen3-235b-a22b"  # MoE混合专家模型
+    temperature: 0.1          # 低温度保证一致性
+    max_tokens: 4096          # 适中的输出长度
+    timeout: 120              # 2分钟超时，快速响应
+```
+
+**为什么选择 Qwen3-235B-A22B？** <mcreference link="https://zhuanlan.zhihu.com/p/1900664299061510967" index="1">1</mcreference> <mcreference link="https://36kr.com/p/3271032585609346" index="3">3</mcreference>
+
+- **⚡ 高效推理**: 2350亿总参数，但仅激活220亿参数进行推理，计算效率极高
+- **💰 成本优化**: 显存占用仅为同等性能Dense模型的三分之一，大幅降低计算成本
+- **🔄 批处理友好**: 适合大量文本块的SPO抽取任务，支持高并发处理
+- **🎯 精准抽取**: 基于已生成的Schema进行结构化抽取，任务相对简单但需要高一致性
+- **🚀 极速响应**: 在M2 Ultra上生成580个token速度约每秒28个，响应迅速
+
+##### 🔄 默认模型配置 - 问答生成阶段
+```yaml
+llm:
+  provider: "bailian"
+  model: "qwen3-30b-a3b-instruct-2507"  # 平衡性能和成本
+  temperature: 0.1          # 低温度保证答案准确性
+  max_tokens: 2048          # 适中的回答长度
+  timeout: 180              # 3分钟超时，实时交互
+```
+
+##### 📊 模型选择对比
+
+| 阶段 | 模型 | 参数规模 | 激活参数 | 适用场景 | 核心优势 |
+|------|------|----------|----------|----------|----------|
+| **Schema生成** | `qwen3-max` | >1T | 全激活 | 文档分析、领域识别 | 顶级推理能力、深度理解 |
+| **SPO抽取** | `qwen3-235b-a22b` | 235B | 22B | 批量结构化抽取 | 高效推理、成本优化 |
+| **问答生成** | `qwen3-30b-a3b-instruct` | 30B | 3B | 实时问答交互 | 平衡性能和响应速度 |
+
+##### 🎯 分层策略优势
+
+1. **🧠 任务适配**: 根据任务复杂度选择合适的模型，避免大材小用或能力不足
+2. **💰 成本控制**: 在保证效果的前提下，最大化成本效益
+3. **⚡ 性能优化**: Schema生成一次性完成，SPO抽取高效批处理，问答实时响应
+4. **🔧 灵活配置**: 可根据实际需求和资源情况调整各阶段的模型选择
 
 #### 2. 两阶段抽取配置
 ```yaml

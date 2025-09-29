@@ -1703,7 +1703,7 @@ class AgenticXGraphRAGDemo:
                     if hasattr(vector_storage, 'collection') and vector_storage.collection:
                         # 检查集合是否存在
                         collection_info = vector_storage.collection.describe()
-                        self.logger.debug(f"Milvus集合: {collection_info["collection_name"]}")
+                        self.logger.debug(f"Milvus集合: {collection_info['collection_name']}")
                         print(f"✅ 向量数据库连接正常，集合已存在")
                         
                         # 尝试获取集合统计信息
