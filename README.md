@@ -357,6 +357,9 @@ cd AgenticX-GraphRAG
 conda create -n agenticx_graphrag python=3.10 -y
 conda activate agenticx_graphrag
 
+# 🔧 安装AgenticX框架（必需）
+pip install -i https://test.pypi.org/simple/ agenticx==0.2.2
+
 # 安装项目依赖
 pip install -r requirements.txt
 
@@ -1461,8 +1464,122 @@ AgenticX GraphRAG演示系统展示了：
 
 这些发现为GraphRAG系统的正确实现提供了宝贵经验。
 
+## 🎯 多跳数据集构建器
+
+本系统还提供了一个强大的**多跳复杂推理问答对数据集构建器**，可以基于任意领域的文档自动生成高质量的多跳推理测试数据集。
+
+### 📋 功能特性
+
+- **🌍 领域通用**: 支持技术、金融、医学等任意领域
+- **📄 多格式支持**: PDF、TXT、JSON、CSV等文档格式
+- **🤖 多模型支持**: 百炼、OpenAI、Anthropic等LLM提供商
+- **🔧 灵活配置**: 通过提示变量系统实现领域定制
+- **📊 质量保证**: 自动验证生成数据的完整性和准确性
+
+### 🚀 快速使用
+
+#### 基础用法
+```bash
+# 基础使用 - 处理目录中的所有文档
+python multihop_dataset_builder.py \
+  --data_path ./documents \
+  --output ./multihop_dataset.json \
+  --llm_provider bailian \
+  --llm_model qwen3-max
+
+# 指定领域和参数
+python multihop_dataset_builder.py \
+  --data_path ./tech_papers \
+  --output ./tech_dataset.json \
+  --domain technology \
+  --sample_nums 20 \
+  --min_docs 2
+```
+
+#### 支持的领域类型
+- `technology`: 技术领域（算法、框架、系统架构）
+- `finance`: 金融领域（交易策略、风险管理、市场分析）
+- `medical`: 医学领域（诊断方法、治疗方案、药物机制）
+- `general`: 通用领域（自动识别主题）
+
+#### 命令行参数说明
+```bash
+# 必需参数
+--data_path     # 数据文件路径（文件或目录）
+--output        # 输出JSON文件路径
+
+# LLM配置
+--llm_provider  # LLM提供商 (bailian, openai, anthropic等)
+--llm_model     # LLM模型名称
+
+# 可选参数
+--domain        # 领域类型 (technology, finance, medical, general)
+--sample_nums   # 生成问题数量
+--min_docs      # 每个问题最少涉及文档数
+--file_types    # 支持的文件类型 (pdf txt json csv等)
+```
+
+### 🎨 自定义领域配置
+
+你可以通过编程方式创建完全自定义的领域配置：
+
+```python
+from multihop_dataset_builder import MultihopDatasetBuilder
+
+# 创建自定义教育领域配置
+custom_domain_config = {
+    'domain_guidance': '''
+请根据文档内容自动识别教育相关主题（如教学方法、学习理论、评估体系等），
+然后选择两个不同教育主题进行组合，生成跨文档多跳问题。
+    '''.strip(),
+    'domain_specific_terms': '教学方法、学习理论、评估指标、教育工具',
+    'comparison_aspect': '教学效果/学习体验/评估准确性/适用范围',
+    'reasoning_pattern': '基于{context}教学实践，分析{target}学习方法的{aspect}如何影响{outcome}教学效果？'
+}
+
+# 使用自定义配置
+builder = MultihopDatasetBuilder("configs.yml")
+await builder.build_dataset(
+    data_path="./education_docs",
+    output_path="./education_dataset.json",
+    domain_config=custom_domain_config
+)
+```
+
+### 📊 输出格式
+
+生成的数据集采用标准JSON格式，与现有的 `multihop_test_dataset.json` 完全兼容：
+
+```json
+[
+  {
+    "query": "跨文档多跳推理问题",
+    "from_docs": ["doc1.pdf", "doc2.pdf"],
+    "expected_output": "基于文档内容的标准答案",
+    "criteria_clarify": "0-5分评分说明"
+  }
+]
+```
+
+### 🔧 配置文件说明
+
+多跳数据集生成使用 `prompts/multihop_dataset_generation.yml` 配置文件：
+
+- **领域通用设计**: 移除了硬编码的领域特定内容
+- **变量化配置**: 通过 `variables` 部分支持灵活定制
+- **无Few-shot**: 避免领域偏见，提升通用性
+- **质量控制**: 内置数据质量验证机制
+
+### 📚 使用示例
+
+查看 `example_usage.py` 文件获取完整的使用示例，包括：
+- 不同领域的配置示例
+- 自定义变量的使用方法
+- 批量处理和单文件处理
+- 错误处理和日志记录
+
 ---
 
 🌟 **感谢使用 AgenticX GraphRAG 演示系统！**
 
-这个演示不仅展示了如何将传统的GraphRAG方法升级为更智能、更高效的两阶段抽取系统，更重要的是通过实际部署发现并解决了三路检索架构的关键问题。希望这些经验能为您的知识图谱项目提供参考和启发！
+这个演示不仅展示了如何将传统的GraphRAG方法升级为更智能、更高效的两阶段抽取系统，更重要的是通过实际部署发现并解决了三路检索架构的关键问题。新增的多跳数据集构建器为GraphRAG系统的评估和测试提供了强大的工具支持。希望这些经验能为您的知识图谱项目提供参考和启发！
