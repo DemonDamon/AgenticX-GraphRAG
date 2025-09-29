@@ -169,7 +169,7 @@ def main():
         if result:
             passed += 1
     
-    logger.info(f"\n🎯 总体结果: {passed}/{total} 项测试通过")
+    logger.info(f"\n总体结果: {passed}/{total} 项测试通过")
     
     if passed == total:
         logger.success("🎉 所有测试通过！Neo4j连接正常")
