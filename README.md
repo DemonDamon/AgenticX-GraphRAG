@@ -363,6 +363,17 @@ pip install agenticx==0.1.3 -i https://pypi.org/simple/
 # 安装项目依赖
 pip install -r requirements.txt
 
+# 如果看到提示 "Note: to be able to use all crisp methods, you need to install some additional packages: {'graph_tool'}"
+# 请按照以下步骤安装graph_tool：
+# 对于Ubuntu/Debian系统：
+# sudo apt-get install python3-graph-tool
+# 对于macOS系统（使用Homebrew）：
+# brew tap homebrew/science
+# brew install graph-tool
+# 对于Conda环境：
+# conda install -c conda-forge graph-tool
+# 更多安装选项请参考：https://graph-tool.skewed.de/download
+
 # 复制并配置环境变量
 cp .env.example .env
 ```
