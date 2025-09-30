@@ -31,12 +31,12 @@ system:
 llm:
   # 默认LLM配置（用于SPO抽取等轻量任务）
   provider: "bailian"  # openai, anthropic, litellm, bailian
-  model: "qwen3-30b-a3b-instruct-2507"  # 原始：qwen3-next-80b-a3b-instruct
+  model: "qwen3-235b-a22b"  # 原始：qwen3-next-80b-a3b-instruct
   api_key: "${BAILIAN_API_KEY}"
   base_url: "${BAILIAN_BASE_URL}"
   temperature: 0.1
   max_tokens: 2048
-  timeout: 180
+  timeout: 360
   retry_attempts: 5
   
   # 强模型配置（用于文档分析和Schema生成）
@@ -93,6 +93,15 @@ knowledge:
       enabled: true
       delimiter: ","
       header_row: true
+    word:
+      enabled: true
+      extract_images: false
+      extract_tables: true
+    powerpoint:
+      enabled: true
+      extract_images: false
+      extract_notes: true
+      include_slide_numbers: true
       
   # 分块配置 - 按用途分离
   chunking:
@@ -304,21 +313,21 @@ retrieval:
     graph_weight: 0.3      # 图检索权重
     vector_weight: 0.4     # 向量检索权重  
     bm25_weight: 0.3       # BM25检索权重
-    deduplication_threshold: 0.8
-    min_combined_score: 0.1
+    deduplication_threshold: 0.7  # 降低去重阈值，保留更多相似内容
+    min_combined_score: 0.05      # 降低最小分数阈值，增加召回
     
   # 向量检索配置
   vector:
     similarity_metric: "cosine"  # cosine, euclidean, dot_product
-    top_k: 100
-    similarity_threshold: 0.2  # 提高阈值，过滤低质量结果
+    top_k: 200              # 增加向量检索数量
+    similarity_threshold: 0.1  # 降低阈值，增加召回范围
     enable_mmr: true  # Maximum Marginal Relevance
     mmr_diversity_bias: 0.3
     
   # 图检索配置
   graph:
     max_depth: 3
-    max_nodes: 50
+    max_nodes: 100          # 增加图检索节点数量
     relationship_weights: true
     enable_path_ranking: true
     community_aware: true
@@ -327,7 +336,7 @@ retrieval:
   bm25:
     k1: 1.2
     b: 0.75
-    top_k: 100
+    top_k: 200             # 增加BM25检索数量
     
   # 自动检索配置
   auto:
@@ -340,7 +349,7 @@ retrieval:
   reranker:
     provider: "cross_encoder"  # cross_encoder, llm_reranker, cohere
     model: "cross-encoder/ms-marco-MiniLM-L-6-v2"
-    top_k: 10
+    top_k: 50              # 大幅增加重排序后的保留数量
     batch_size: 32
     
   # 查询分析配置
@@ -363,10 +372,10 @@ rag:
     
   # 检索配置
   retrieval:
-    default_top_k: 100
-    max_context_length: 8000
+    default_top_k: 200        # 增加默认检索数量
+    max_context_length: 12000 # 增加最大上下文长度
     enable_context_compression: true
-    compression_ratio: 0.7
+    compression_ratio: 0.6    # 降低压缩比例，保留更多内容
     
   # 生成配置
   generation:

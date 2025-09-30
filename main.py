@@ -59,7 +59,9 @@ from agenticx.knowledge.readers import (
     PDFReader,
     TextReader,
     JSONReader,
-    CSVReader
+    CSVReader,
+    WordReader,
+    PowerPointReader
 )
 from agenticx.embeddings import (
     EmbeddingRouter,
@@ -529,7 +531,7 @@ class AgenticXGraphRAGDemo:
             raise FileNotFoundError(f"数据目录不存在: {self.data_dir}")
         
         # 支持的文件类型
-        supported_extensions = {'.pdf', '.txt', '.json', '.csv', '.md'}
+        supported_extensions = {'.pdf', '.txt', '.json', '.csv', '.md', '.doc', '.docx', '.ppt', '.pptx'}
         
         # 扫描文件
         files = []
@@ -570,6 +572,14 @@ class AgenticXGraphRAGDemo:
                     csv_config = reader_config['csv'].copy()
                     csv_config.pop('enabled', None)  # 移除enabled字段
                     reader = CSVReader(**csv_config)
+                elif file_path.suffix.lower() in ['.doc', '.docx'] and reader_config.get('word', {}).get('enabled', True):
+                    word_config = reader_config.get('word', {}).copy()
+                    word_config.pop('enabled', None)  # 移除enabled字段
+                    reader = WordReader(**word_config)
+                elif file_path.suffix.lower() in ['.ppt', '.pptx'] and reader_config.get('powerpoint', {}).get('enabled', True):
+                    ppt_config = reader_config.get('powerpoint', {}).copy()
+                    ppt_config.pop('enabled', None)  # 移除enabled字段
+                    reader = PowerPointReader(**ppt_config)
                 else:
                     self.logger.warning(f"不支持的文件类型或已禁用: {file_path}")
                     continue
