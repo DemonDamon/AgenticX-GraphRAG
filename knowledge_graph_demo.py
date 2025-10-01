@@ -43,10 +43,10 @@ from agenticx.knowledge.graphers import (
     Document, DocumentMetadata, Entity, Relationship, KnowledgeGraph,
     EntityType, RelationType,
     # Builders
-    KnowledgeGraphBuilder, EntityExtractor, RelationshipExtractor,
+    KnowledgeGraphBuilder,
     GraphQualityValidator,
     # Advanced constructors
-    GraphRAGConstructor, CommunityDetector, GraphOptimizer
+    CommunityDetector, GraphOptimizer
 )
 from agenticx.knowledge.graphers.config import GrapherConfig
 
@@ -219,17 +219,21 @@ def graphrag_construction_demo():
         )
     ]
     
-    # Build GraphRAG
-    constructor = GraphRAGConstructor(
-        config=grapher_config.graphrag,
-        llm_config=grapher_config.llm
-    )
+    # Build GraphRAG - Note: GraphRAGConstructor has been removed
+    # Use KnowledgeGraphBuilder instead
+    print("Note: GraphRAGConstructor has been removed. Please use KnowledgeGraphBuilder with SPO extraction.")
+    return  # Skip this demo for now
     
-    texts = [doc.content for doc in documents]
-    metadata = [vars(doc.metadata) for doc in documents]
-    
-    graph = constructor.construct_from_texts(texts, metadata)
-    graph.name = "AI Knowledge Graph"
+    # constructor = GraphRAGConstructor(
+    #     config=grapher_config.graphrag,
+    #     llm_config=grapher_config.llm
+    # )
+    # 
+    # texts = [doc.content for doc in documents]
+    # metadata = [vars(doc.metadata) for doc in documents]
+    # 
+    # graph = constructor.construct_from_texts(texts, metadata)
+    # graph.name = "AI Knowledge Graph"
     
     print(f"GraphRAG Name: {graph.name}")
     print(f"Total Nodes: {graph.graph.number_of_nodes()}")
@@ -294,13 +298,16 @@ def incremental_update_demo(graph: KnowledgeGraph):
 
     grapher_config = GrapherConfig.from_dict(config_data)
 
-    # Perform incremental update
-    constructor = GraphRAGConstructor(
-        config=grapher_config.graphrag,
-        llm_config=grapher_config.llm
-    )
-    new_texts = [doc.content for doc in new_documents]
-    updated_graph = constructor.construct_incremental(graph, new_texts)
+    # Perform incremental update - Note: GraphRAGConstructor has been removed
+    print("Note: GraphRAGConstructor has been removed. Please use KnowledgeGraphBuilder with SPO extraction.")
+    return  # Skip this demo for now
+    
+    # constructor = GraphRAGConstructor(
+    #     config=grapher_config.graphrag,
+    #     llm_config=grapher_config.llm
+    # )
+    # new_texts = [doc.content for doc in new_documents]
+    # updated_graph = constructor.construct_incremental(graph, new_texts)
     
     print(f"Updated graph: {len(updated_graph.entities)} entities, {len(updated_graph.relationships)} relationships")
     
