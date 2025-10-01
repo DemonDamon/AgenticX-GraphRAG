@@ -49,9 +49,7 @@ from agenticx.knowledge import (
     Knowledge,
     Document,
     DocumentProcessor,
-    GraphRAGConstructor,
-    KnowledgeGraphBuilder,
-    SemanticChunker,
+    KnowledgeGraphBuilder,   SemanticChunker,
     AgenticChunker,
     get_chunker
 )
@@ -474,6 +472,8 @@ class AgenticXGraphRAGDemo:
         if not hasattr(self, '_graph_vector_storage') or not self._graph_vector_storage:
             from agenticx.storage.vectordb_storages.milvus import MilvusStorage
             storage_config = self.config['storage']['vector']['milvus']
+            # 根据运行模式决定是否重新创建图向量集合
+            recreate_graph_collection = self.mode in ["full", "build"]
             self._graph_vector_storage = MilvusStorage(
                 dimension=1024,  # 使用嵌入维度
                 host=storage_config['host'],
@@ -482,7 +482,7 @@ class AgenticXGraphRAGDemo:
                 database=storage_config.get('database', 'default'),
                 username=storage_config.get('username'),
                 password=storage_config.get('password'),
-                recreate_if_exists=False  # 🔧 修复：qa模式下不要重新创建集合
+                recreate_if_exists=recreate_graph_collection  # 🔧 修复：根据模式决定是否重新创建
             )
         
         # 配置图向量索引
@@ -1300,23 +1300,46 @@ class AgenticXGraphRAGDemo:
         self.logger.info(f"开始处理查询: {query}")
         
         try:
-            # 获取检索配置
+            # 🔧 修复：正确获取RAG和检索配置
+            rag_config = self.config.get('rag', {})
+            rag_retrieval_config = rag_config.get('retrieval', {})
             retrieval_config = self.config.get('retrieval', {})
             vector_config = retrieval_config.get('vector', {})
-            hybrid_top_k = vector_config.get('top_k', 20)
+            graph_config = retrieval_config.get('graph', {})
+            
+            # 🔧 调试：打印配置内容
+            self.logger.info(f"🔍 配置调试:")
+            self.logger.info(f"  rag_config keys: {list(rag_config.keys())}")
+            self.logger.info(f"  rag_retrieval_config: {rag_retrieval_config}")
+            self.logger.info(f"  vector_config top_k: {vector_config.get('top_k', 'NOT_FOUND')}")
+            self.logger.info(f"  graph_config max_nodes: {graph_config.get('max_nodes', 'NOT_FOUND')}")
+            
+            # 使用RAG配置中的default_top_k，如果没有则使用向量配置的top_k
+            hybrid_top_k = rag_retrieval_config.get('default_top_k', vector_config.get('top_k', 20))
+            graph_top_k = graph_config.get('max_nodes', 50)  # 使用图配置中的max_nodes作为top_k
             similarity_threshold = vector_config.get('similarity_threshold', 0.2)
+            # 🔧 修复：使用配置文件中的图检索阈值，而不是硬编码计算
+            graph_similarity_threshold = graph_config.get('similarity_threshold', 0.3)  # 从配置读取图检索阈值
+
+            self.logger.info(f"🎯 最终检索参数: hybrid_top_k={hybrid_top_k}, graph_top_k={graph_top_k}, vector_threshold={similarity_threshold}, graph_threshold={graph_similarity_threshold}")
             
-            # 1. 执行混合检索
-            # 1. 执行混合检索
-            hybrid_results = await self.retriever.retrieve(query, top_k=hybrid_top_k)
+
+            # 1. 执行混合检索 - 🔧 修复：传递相似度阈值
+            self.logger.info(f"🔍 开始混合检索，请求top_k={hybrid_top_k}, min_score={similarity_threshold}")
+            hybrid_results = await self.retriever.retrieve(query, top_k=hybrid_top_k, min_score=similarity_threshold)
+            self.logger.info(f"🔍 混合检索实际返回: {len(hybrid_results)}条")
             
-            # 2. 执行图检索
+            # 2. 执行图检索 - 🔧 修复：使用配置的top_k和更低的相似度阈值
             graph_results = []
             if hasattr(self, 'graph_retriever') and self.graph_retriever:
                 try:
-                    graph_results = await self.graph_retriever.retrieve(query, top_k=10)
+                    self.logger.info(f"🔗 开始图检索，请求top_k={graph_top_k}, min_score={graph_similarity_threshold}")
+                    graph_results = await self.graph_retriever.retrieve(query, top_k=graph_top_k, min_score=graph_similarity_threshold)
+                    self.logger.info(f"🔗 图检索实际返回: {len(graph_results)}条")
                 except Exception as e:
                     self.logger.warning(f"图检索失败: {e}")
+            else:
+                self.logger.warning("🔗 图检索器不可用")
             
             # 3. 合并和去重
             all_results = hybrid_results + graph_results
@@ -1448,6 +1471,7 @@ class AgenticXGraphRAGDemo:
                 relations = []
                 triples = []
                 communities = []
+                other_graph = []
                 
                 for result in graph_results[:graph_count]:
                     if not result.content.strip():
@@ -1455,50 +1479,22 @@ class AgenticXGraphRAGDemo:
                         
                     vector_type = result.metadata.get('vector_type', 'unknown') if result.metadata else 'unknown'
                     score = getattr(result, 'score', 0.0)
+                    content = result.content.strip()
                     
-                    if vector_type == 'node' or 'Entity' in result.content:
-                        # 提取实体名称和描述
-                        content = result.content
-                        entity_name = ""
-                        entity_desc = ""
-                        
-                        if ' - ' in content:
-                            parts = content.split(' - ')
-                            entity_name = parts[0].replace('Entity: ', '').strip()
-                            entity_desc = parts[1].replace(' - (类型: Entity)', '') if len(parts) > 1 else ''
-                        else:
-                            parts = content.split('. ')
-                            entity_name = parts[0].replace('Entity: ', '').strip()
-                            entity_desc = parts[1] if len(parts) > 1 and parts[1] != 'Labels: Entity' else ''
-                        
-                        # 过滤掉无用的"动态创建的实体"描述
-                        if entity_desc.startswith('动态创建的实体:') or entity_desc.startswith('实体:'):
-                            # 尝试从metadata中获取更好的描述
-                            if result.metadata and 'description' in result.metadata:
-                                entity_desc = result.metadata['description']
-                            elif result.metadata and 'properties' in result.metadata:
-                                props = result.metadata['properties']
-                                if isinstance(props, dict) and 'description' in props:
-                                    entity_desc = props['description']
-                                else:
-                                    entity_desc = f"知识图谱实体"
-                            else:
-                                entity_desc = f"知识图谱实体"
-                        
-                        # 确保描述有意义
-                        if not entity_desc or entity_desc.strip() in ['', 'Labels: Entity']:
-                            entity_desc = f"知识图谱中的{entity_name}实体"
-                        
-                        entities.append(f"• {entity_name}: {entity_desc} [score: {score:.3f}]")
-                    
-                    elif vector_type == 'relation':
-                        relations.append(f"• {result.content} [score: {score:.3f}]")
+                    # 根据类型分类，保持原始内容完整性
+                    if vector_type == 'node' or 'Entity:' in content:
+                        entities.append(f"• {content} [相关度: {score:.3f}]")
+                    elif vector_type == 'relation' or 'Relationship:' in content:
+                        relations.append(f"• {content} [相关度: {score:.3f}]")
                     elif vector_type == 'triple':
-                        triples.append(f"• {result.content} [score: {score:.3f}]")
+                        triples.append(f"• {content} [相关度: {score:.3f}]")
                     elif vector_type == 'community':
-                        communities.append(f"• {result.content} [score: {score:.3f}]")
+                        communities.append(f"• {content} [相关度: {score:.3f}]")
+                    else:
+                        # 其他类型的图检索结果
+                        other_graph.append(f"• {content} [相关度: {score:.3f}]")
                 
-                # 添加各类型结果
+                # 按类型添加结果，保持结构化展示
                 if entities:
                     context_sections.append("实体信息:")
                     context_sections.extend(entities)
@@ -1511,6 +1507,9 @@ class AgenticXGraphRAGDemo:
                 if communities:
                     context_sections.append("\n社区信息:")
                     context_sections.extend(communities)
+                if other_graph:
+                    context_sections.append("\n其他图谱信息:")
+                    context_sections.extend(other_graph)
             
             # === 文档检索结果 ===
             if doc_results:
@@ -1523,25 +1522,33 @@ class AgenticXGraphRAGDemo:
                     if result.content.strip():
                         score = getattr(result, 'score', 0.0)
                         
-                        # 提取页码信息
-                        page_info = ""
-                        if result.metadata and 'page' in result.metadata:
-                            page_info = f"Page {result.metadata['page']}"
-                        elif "--- Page" in result.content:
-                            # 从内容中提取页码
+                        # 提取文档元信息
+                        doc_info = ""
+                        if result.metadata:
+                            # 提取页码信息
+                            if 'page' in result.metadata:
+                                doc_info = f"Page {result.metadata['page']}"
+                            # 提取文档标题或来源
+                            elif 'document_title' in result.metadata:
+                                doc_info = f"{result.metadata['document_title']}"
+                            elif 'source' in result.metadata:
+                                doc_info = f"{result.metadata['source']}"
+                        
+                        # 从内容中提取页码信息（如果metadata中没有）
+                        if not doc_info and "--- Page" in result.content:
                             import re
                             page_match = re.search(r'--- Page (\d+) ---', result.content)
                             if page_match:
-                                page_info = f"Page {page_match.group(1)}"
+                                doc_info = f"Page {page_match.group(1)}"
                         
-                        # 清理和截取文档内容
-                        content = result.content.replace('--- Page', '\n--- Page').strip()
-                        if len(content) > 400:
-                            # 智能截取：保留开头和结尾
-                            content = content[:200] + "\n...\n" + content[-200:]
+                        # 保持文档内容完整性，只做基本格式清理
+                        content = result.content.strip()
+                        # 规范化页码分隔符格式
+                        content = content.replace('--- Page', '\n--- Page')
                         
-                        page_prefix = f"[{page_info}] " if page_info else f"[文档 {i+1}] "
-                        context_sections.append(f"{page_prefix}{content} [score: {score:.3f}]")
+                        # 构建文档条目
+                        doc_prefix = f"{doc_info}: " if doc_info else ""
+                        context_sections.append(f"{doc_prefix}{content} [相关度: {score:.3f}]")
             
             context = "\n".join(context_sections)
             

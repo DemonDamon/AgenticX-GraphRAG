@@ -320,7 +320,7 @@ retrieval:
   vector:
     similarity_metric: "cosine"  # cosine, euclidean, dot_product
     top_k: 200              # 增加向量检索数量
-    similarity_threshold: 0.1  # 降低阈值，增加召回范围
+    similarity_threshold: 0.2  # 🔧 大幅降低阈值，增加召回范围
     enable_mmr: true  # Maximum Marginal Relevance
     mmr_diversity_bias: 0.3
     
@@ -328,6 +328,7 @@ retrieval:
   graph:
     max_depth: 3
     max_nodes: 100          # 增加图检索节点数量
+    similarity_threshold: 0.1  # 图检索相似度阈值，过滤低质量结果
     relationship_weights: true
     enable_path_ranking: true
     community_aware: true

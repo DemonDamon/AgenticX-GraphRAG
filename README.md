@@ -367,7 +367,7 @@ conda create -n agenticx_graphrag python=3.11 -y
 conda activate agenticx_graphrag
 
 # 安装AgenticX框架
-pip install agenticx==0.1.5 -i https://pypi.org/simple/
+pip install agenticx==0.1.6 -i https://pypi.org/simple/
 
 # 安装项目依赖
 pip install -r requirements.txt
