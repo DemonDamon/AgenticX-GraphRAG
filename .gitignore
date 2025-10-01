@@ -208,4 +208,3 @@ __marimo__/
 workspace/
 **.db
 custom_schema.json
-data/
