@@ -319,16 +319,16 @@ retrieval:
   # 向量检索配置
   vector:
     similarity_metric: "cosine"  # cosine, euclidean, dot_product
-    top_k: 200              # 增加向量检索数量
-    similarity_threshold: 0.2  # 🔧 大幅降低阈值，增加召回范围
+    top_k: 50               # 🔧 修复：适中的向量检索数量，配合阈值过滤
+    similarity_threshold: 0.5  # 🔧 修复：使用合理的相似度阈值，有效过滤低质量结果
     enable_mmr: true  # Maximum Marginal Relevance
     mmr_diversity_bias: 0.3
     
   # 图检索配置
   graph:
     max_depth: 3
-    max_nodes: 100          # 增加图检索节点数量
-    similarity_threshold: 0.1  # 图检索相似度阈值，过滤低质量结果
+    max_nodes: 30           # 🔧 修复：适中的图检索节点数量
+    similarity_threshold: 0.3  # 🔧 修复：合理的图检索相似度阈值
     relationship_weights: true
     enable_path_ranking: true
     community_aware: true
@@ -337,7 +337,7 @@ retrieval:
   bm25:
     k1: 1.2
     b: 0.75
-    top_k: 200             # 增加BM25检索数量
+    top_k: 50              # 🔧 修复：适中的BM25检索数量
     
   # 自动检索配置
   auto:
@@ -373,10 +373,10 @@ rag:
     
   # 检索配置
   retrieval:
-    default_top_k: 200        # 增加默认检索数量
-    max_context_length: 12000 # 增加最大上下文长度
+    default_top_k: 100         # 🔧 修复：大幅降低默认检索数量，控制上下文长度
+    max_context_length: 32000  # 🔧 修复：降低最大上下文长度，避免token超限
     enable_context_compression: true
-    compression_ratio: 0.6    # 降低压缩比例，保留更多内容
+    compression_ratio: 0.8    # 🔧 修复：提高压缩比例，减少冗余内容
     
   # 生成配置
   generation:
