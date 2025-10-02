@@ -1811,12 +1811,12 @@ class AgenticXGraphRAGDemo:
             self.logger.info(f"  vector_config top_k: {vector_config.get('top_k', 'NOT_FOUND')}")
             self.logger.info(f"  graph_config max_nodes: {graph_config.get('max_nodes', 'NOT_FOUND')}")
             
-            # 🔧 优化：降低阈值，增加召回率
-            hybrid_top_k = rag_retrieval_config.get('default_top_k', vector_config.get('top_k', 200))
-            graph_top_k = graph_config.get('max_nodes', 100)
-            # 🚀 新增：动态调整阈值
-            similarity_threshold = max(0.1, vector_config.get('similarity_threshold', 0.2) * 0.5)  # 降低50%
-            graph_similarity_threshold = max(0.05, graph_config.get('similarity_threshold', 0.1) * 0.5)  # 降低50%
+            # 🔧 修复：使用合理的检索参数
+            hybrid_top_k = rag_retrieval_config.get('default_top_k', vector_config.get('top_k', 20))
+            graph_top_k = graph_config.get('max_nodes', 15)
+            # 🔧 修复：使用配置中的原始阈值，不再人为降低
+            similarity_threshold = vector_config.get('similarity_threshold', 0.5)  # 使用合理的阈值
+            graph_similarity_threshold = graph_config.get('similarity_threshold', 0.3)  # 使用合理的阈值
 
             self.logger.info(f"🎯 优化后检索参数: hybrid_top_k={hybrid_top_k}, graph_top_k={graph_top_k}, vector_threshold={similarity_threshold}, graph_threshold={graph_similarity_threshold}")
             
@@ -2057,6 +2057,10 @@ class AgenticXGraphRAGDemo:
             rag_config = self.config.get('rag', {})
             retrieval_config = rag_config.get('retrieval', {})
             context_top_k = retrieval_config.get('default_top_k', 10)
+            max_context_length = retrieval_config.get('max_context_length', 4000)
+            
+            # 🔧 修复：添加单个内容片段的最大长度限制
+            max_content_per_item = 500  # 每个检索结果最多保留500字符
             
             # 🔧 修复：更宽松的结果分类，确保所有结果都能被处理
             graph_results = []
@@ -2095,30 +2099,69 @@ class AgenticXGraphRAGDemo:
             # 合并图检索和实体结果
             graph_results.extend(entity_results)
             
-            # 🔧 修复：确保所有结果都能被使用，优先使用所有可用结果
+            # 🔧 修复：优化内容选择策略，按相关度排序
+            # 首先对所有结果按相关度排序
+            all_sorted_results = sorted(results, key=lambda x: getattr(x, 'score', 0), reverse=True)
+            
+            # 🔧 修复：平衡选择不同类型的内容，确保多样性
             context_results = []
             
-            # 如果有文档结果，优先使用文档结果
-            if doc_results:
-                doc_count = min(len(doc_results), max(context_top_k // 2, 3))  # 至少保留3个文档结果
-                context_results.extend(doc_results[:doc_count])
+            # 按相关度选择最佳结果，但保持类型平衡
+            doc_selected = 0
+            graph_selected = 0
+            entity_selected = 0
+            other_selected = 0
             
-            # 添加图检索和实体结果
-            if graph_results:
-                remaining_slots = context_top_k - len(context_results)
-                graph_count = min(len(graph_results), max(remaining_slots, 2))  # 至少保留2个图结果
-                context_results.extend(graph_results[:graph_count])
+            max_per_type = max(2, context_top_k // 4)  # 每种类型最多选择的数量
             
-            # 添加其他结果
-            if other_results:
+            for result in all_sorted_results:
+                if len(context_results) >= context_top_k:
+                    break
+                
+                if not result.metadata:
+                    if other_selected < max_per_type:
+                        context_results.append(result)
+                        other_selected += 1
+                    continue
+                
+                search_source = result.metadata.get('search_source', '')
+                result_type = result.metadata.get('type', '')
+                
+                # 优先选择高质量的实体结果
+                if (result_type == 'entity' or search_source == 'direct_entity') and entity_selected < max_per_type:
+                    context_results.append(result)
+                    entity_selected += 1
+                # 然后选择文档结果
+                elif (result_type in ['document_chunk', 'bm25_chunk', 'vector_chunk'] or 
+                      'document_id' in result.metadata or 
+                      'document_title' in result.metadata or
+                      search_source in ['vector', 'bm25', 'hybrid']) and doc_selected < max_per_type:
+                    context_results.append(result)
+                    doc_selected += 1
+                # 最后选择图检索结果
+                elif (search_source in ['graph_vector', 'graph', 'full_text'] or 
+                      result_type in ['relationship', 'triple', 'community']) and graph_selected < max_per_type:
+                    context_results.append(result)
+                    graph_selected += 1
+                # 其他结果
+                elif other_selected < max_per_type:
+                    context_results.append(result)
+                    other_selected += 1
+            
+            # 🔧 如果还有空位，按相关度填充剩余位置
+            if len(context_results) < context_top_k:
                 remaining_slots = context_top_k - len(context_results)
-                if remaining_slots > 0:
-                    context_results.extend(other_results[:remaining_slots])
+                selected_ids = {id(r) for r in context_results}
+                for result in all_sorted_results:
+                    if len(context_results) >= context_top_k:
+                        break
+                    if id(result) not in selected_ids:
+                        context_results.append(result)
             
             # 🔧 如果分类后没有结果，直接使用所有原始结果
             if not context_results and results:
                 self.logger.warning("分类后无结果，直接使用所有原始结果")
-                context_results = results[:context_top_k]
+                context_results = all_sorted_results[:context_top_k]
             
             # 🔧 重新设计上下文格式，支持所有类型的结果
             context_sections = []
@@ -2144,6 +2187,11 @@ class AgenticXGraphRAGDemo:
                      if not content:
                          self.logger.warning(f"结果{i+1}内容为空，跳过")
                          continue
+                     
+                     # 🔧 修复：截断过长的内容
+                     if len(content) > max_content_per_item:
+                         content = content[:max_content_per_item] + "..."
+                         self.logger.debug(f"结果{i+1}内容被截断到{max_content_per_item}字符")
                      
                      # 获取分数
                      score = 0.0
@@ -2239,8 +2287,13 @@ class AgenticXGraphRAGDemo:
             
             context = "\n".join(context_sections)
             
+            # 🔧 修复：添加最终上下文长度检查和截断
+            if len(context) > max_context_length:
+                self.logger.warning(f"上下文长度{len(context)}超过限制{max_context_length}，进行截断")
+                context = context[:max_context_length] + "\n\n[注：内容因长度限制被截断]"
+            
             # 🔧 调试：检查最终上下文
-            self.logger.info(f"最终上下文长度: {len(context)}字符")
+            self.logger.info(f"最终上下文长度: {len(context)}字符 (限制: {max_context_length})")
             if len(context) < 50:
                 self.logger.warning(f"上下文过短: '{context}'")
                 # 如果上下文太短，强制添加一些内容
@@ -2248,10 +2301,10 @@ class AgenticXGraphRAGDemo:
                     context = "=== 检索到的信息 ===\n"
                     for i, result in enumerate(context_results[:3]):
                         try:
-                            content = str(getattr(result, 'content', result))
+                            content = str(getattr(result, 'content', result))[:300]  # 限制每个结果300字符
                             context += f"结果{i+1}: {content}\n"
                         except:
-                            context += f"结果{i+1}: {str(result)}\n"
+                            context += f"结果{i+1}: {str(result)[:200]}\n"
             
             # 使用提示词管理器加载模板
             try:
