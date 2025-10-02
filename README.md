@@ -425,6 +425,35 @@ docker-compose ps
 
 ### 4.4 运行演示
 
+本系统提供两种运行方式，根据不同需求选择：
+
+#### 🎨 推荐方式：demo.py（增强交互界面）
+
+**特点**：
+- ✨ **美观的橙色主题界面**：Rich 库驱动的彩色终端界面
+- 🔄 **交互式模式**：动态配置数据路径、运行模式等
+- 📁 **智能文件选择**：自动扫描 `data` 和 `data2` 目录
+- 💬 **命令支持**：支持 `/help`、`/clear`、`/mode`、`/data`、`/rebuild`、`/exit` 等命令
+- 📊 **丰富状态显示**：进度条、面板、表格等可视化元素
+
+```bash
+# 🌟 交互式模式（推荐，默认启动方式）
+python demo.py
+
+# 传统命令行模式（完全兼容 main.py）
+python demo.py --mode full        # 完整流程
+python demo.py --mode build       # 仅构建知识库  
+python demo.py --mode qa          # 仅启动问答
+python demo.py --config configs.yml --data-path data
+```
+
+#### ⚡ 传统方式：main.py（轻量命令行）
+
+**特点**：
+- 🔧 **轻量级**：纯命令行界面，无额外依赖
+- ⚡ **快速启动**：适合脚本化和自动化场景
+- 🎯 **专注核心**：只关注 GraphRAG 核心功能
+
 ```bash
 # 完整流程（文档解析 + 知识库构建 + 问答）
 python main.py --mode full
@@ -435,6 +464,24 @@ python main.py --mode build
 # 仅启动问答系统
 python main.py --mode qa
 ```
+
+#### 📋 功能对比
+
+| 功能特性 | demo.py | main.py | 说明 |
+|---------|---------|---------|------|
+| **核心功能** | ✅ 完全支持 | ✅ 完全支持 | GraphRAG 完整流程 |
+| **运行模式** | ✅ full/build/qa/interactive | ✅ full/build/qa | demo.py 新增交互式模式 |
+| **用户界面** | 🎨 Rich 彩色界面 | 📝 纯文本界面 | demo.py 提供更好体验 |
+| **数据选择** | 🔄 交互式选择 | 📁 固定 data 目录 | demo.py 支持动态选择 |
+| **命令支持** | 💬 /help, /clear 等 | ❌ 不支持 | demo.py 提供便捷命令 |
+| **配置方式** | 🔧 交互式 + 命令行 | 🔧 仅命令行 | demo.py 更灵活 |
+| **适用场景** | 👥 日常使用、演示 | 🤖 脚本化、自动化 | 各有优势 |
+
+#### 💡 使用建议
+
+- **日常使用和演示**：推荐使用 `python demo.py`，享受更好的交互体验
+- **脚本化和自动化**：使用 `python main.py`，更适合批处理和 CI/CD
+- **功能完全相同**：两者的 GraphRAG 核心功能完全一致，只是界面不同
 
 ### 4.1 模型选型研究
 
