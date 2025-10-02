@@ -78,10 +78,10 @@ class EnhancedRetriever:
             ),
             RetrievalStrategy(
                 name="fuzzy",
-                vector_threshold=0.05,
-                graph_threshold=0.01,
-                bm25_min_score=0.0,
-                top_k=200,
+                vector_threshold=0.15,  # 🔧 修复：提高模糊模式阈值，避免过多无关结果
+                graph_threshold=0.05,   # 🔧 修复：提高图检索阈值
+                bm25_min_score=0.1,     # 🔧 修复：添加BM25最低分数要求
+                top_k=100,              # 🔧 修复：降低最大返回数量
                 description="模糊模式 - 最大召回"
             ),
             RetrievalStrategy(
@@ -110,6 +110,37 @@ class EnhancedRetriever:
             # 1. 智能查询预处理
             processed_query = self.query_processor.process_query(query)
             logger.info(f"查询预处理完成: {processed_query.query_type}, 置信度: {processed_query.confidence}")
+            
+            # 🔧 修复：特殊查询类型的直接处理
+            if processed_query.query_type == 'greeting':
+                logger.info("检测到问候语，返回友好回复")
+                greeting_result = RetrievalResult(
+                    content="你好！我是AgenticX GraphRAG智能问答助手。我可以帮您查询知识库中的信息，请告诉我您想了解什么？",
+                    score=1.0,
+                    metadata={'type': 'greeting_response', 'search_source': 'system'}
+                )
+                return [greeting_result], {
+                    'processed_query': processed_query,
+                    'search_queries': [query],
+                    'strategy_used': 'greeting_handler',
+                    'total_results': 1,
+                    'success': True
+                }
+            
+            if processed_query.query_type == 'meaningless':
+                logger.info("检测到无意义查询，返回提示")
+                help_result = RetrievalResult(
+                    content="请输入具体的问题，我可以帮您查询相关信息。例如：\n• 查询特定概念或实体\n• 询问技术原理\n• 了解产品服务等",
+                    score=1.0,
+                    metadata={'type': 'help_response', 'search_source': 'system'}
+                )
+                return [help_result], {
+                    'processed_query': processed_query,
+                    'search_queries': [query],
+                    'strategy_used': 'help_handler',
+                    'total_results': 1,
+                    'success': True
+                }
             
             # 2. 生成多个搜索查询
             search_queries = self.query_processor.generate_search_queries(processed_query)
