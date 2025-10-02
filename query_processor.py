@@ -129,6 +129,16 @@ class ChineseQueryProcessor:
 
     def _identify_query_type(self, query: str) -> tuple[str, float]:
         """识别查询类型"""
+        # 🔧 修复：添加问候语检测
+        greetings = ['你好', 'hello', 'hi', '您好', '早上好', '下午好', '晚上好', 'nihao']
+        if any(greeting in query.lower() for greeting in greetings):
+            return 'greeting', 0.95
+        
+        # 🔧 修复：添加无意义查询检测
+        meaningless = ['测试', 'test', '试试', '看看', '随便', '没事']
+        if any(word in query.lower() for word in meaningless) and len(query) < 10:
+            return 'meaningless', 0.9
+        
         for pattern, query_type in self.question_patterns.items():
             if re.search(pattern, query):
                 return query_type, 0.9
