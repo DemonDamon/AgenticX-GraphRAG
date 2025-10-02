@@ -211,29 +211,29 @@ def print_welcome():
 ██║  ██║╚██████╔╝███████╗██║ ╚████║   ██║   ██║╚██████╗██╔╝ ██╗
 ╚═╝  ╚═╝ ╚═════╝ ╚══════╝╚═╝  ╚═══╝   ╚═╝   ╚═╝ ╚═════╝╚═╝  ╚═╝
 
-   ██████╗ ██████╗  █████╗ ██████╗ ██╗  ██╗██████╗  █████╗  ██████╗ 
-  ██╔════╝ ██╔══██╗██╔══██╗██╔══██╗██║  ██║██╔══██╗██╔══██╗██╔════╝ 
-  ██║  ███╗██████╔╝███████║██████╔╝███████║██████╔╝███████║██║  ███╗
-  ██║   ██║██╔══██╗██╔══██║██╔═══╝ ██╔══██║██╔══██╗██╔══██║██║   ██║
-  ╚██████╔╝██║  ██║██║  ██║██║     ██║  ██║██║  ██║██║  ██║╚██████╔╝
-   ╚═════╝ ╚═╝  ╚═╝╚═╝  ╚═╝╚═╝     ╚═╝  ╚═╝╚═╝  ╚═╝╚═╝  ╚═╝ ╚═════╝ 
+██████╗ ██████╗  █████╗ ██████╗ ██╗  ██╗██████╗  █████╗  ██████╗ 
+██╔════╝ ██╔══██╗██╔══██╗██╔══██╗██║  ██║██╔══██╗██╔══██╗██╔════╝ 
+██║  ███╗██████╔╝███████║██████╔╝███████║██████╔╝███████║██║  ███╗
+██║   ██║██╔══██╗██╔══██║██╔═══╝ ██╔══██║██╔══██╗██╔══██║██║   ██║
+╚██████╔╝██║  ██║██║  ██║██║     ██║  ██║██║  ██║██║  ██║╚██████╔╝
+╚═════╝ ╚═╝  ╚═╝╚═╝  ╚═╝╚═╝     ╚═╝  ╚═╝╚═╝  ╚═╝╚═╝  ╚═╝ ╚═════╝ 
                                                                       
     """
     
     if console and Panel:
         # 使用 Rich 显示活力橙色主题的 logo 和信息
-        console.print(graphrag_logo, style="bold orange1")
+        console.print(graphrag_logo, style="bold #FF6B35")
         
         # 环境配置信息
         api_key = os.getenv('BAILIAN_API_KEY', 'sk-***')
         api_key_display = f"{api_key[:8]}..." if len(api_key) > 8 else api_key
         
-        console.print("● 智能知识图谱问答系统:", style="bold orange1")
+        console.print("● 智能知识图谱问答系统:", style="bold #FF6B35")
         console.print("  ⎿  文档解析 + 知识图谱构建 + 混合检索 + 智能问答", style="dim")
         console.print("  ⎿  支持多种文档格式：PDF、Word、PPT、TXT", style="dim")
         console.print("  ⎿  多跳推理、实体关系查询、社区发现\n", style="dim")
         
-        console.print("● 环境配置:", style="bold orange1")
+        console.print("● 环境配置:", style="bold #FF6B35")
         console.print(f"  ⎿  API Key: {api_key_display}", style="dim")
         console.print(f"  ⎿  工作目录: {os.getcwd()}", style="dim")
         console.print(f"  ⎿  配置文件: configs.yml\n", style="dim")
@@ -283,8 +283,8 @@ def print_help():
     """显示帮助信息"""
     if console and Table and box:
         # 使用 Rich 创建美观的帮助表格
-        table = Table(title="[bold orange1]可用命令[/bold orange1]", box=box.ROUNDED)
-        table.add_column("命令", style="bold bright_yellow", width=12)
+        table = Table(title="[bold #FF6B35]可用命令[/bold #FF6B35]", box=box.ROUNDED)
+        table.add_column("命令", style="bold #FF6B35", width=12)
         table.add_column("描述", style="white")
         
         table.add_row("/help", "显示帮助信息")
@@ -361,9 +361,9 @@ def display_data_selection() -> str:
     
     if console and Table and box:
         # 使用 Rich 显示文件选择表格
-        table = Table(title="[bold orange1]📁 可用文档目录[/bold orange1]", box=box.ROUNDED)
-        table.add_column("目录", style="bold orange1", width=10)
-        table.add_column("文件数", style="bright_yellow", width=8)
+        table = Table(title="[bold #FF6B35]📁 可用文档目录[/bold #FF6B35]", box=box.ROUNDED)
+        table.add_column("目录", style="bold #FF6B35", width=10)
+        table.add_column("文件数", style="bold #FF6B35", width=8)
         table.add_column("文件列表", style="white")
         
         for dir_name, files in file_info.items():
@@ -382,9 +382,9 @@ def display_data_selection() -> str:
         # 显示详细文件信息
         for dir_name, files in file_info.items():
             if files:
-                detail_table = Table(title=f"[bold orange1]{dir_name}/ 目录详情[/bold orange1]", box=box.SIMPLE)
+                detail_table = Table(title=f"[bold #FF6B35]{dir_name}/ 目录详情[/bold #FF6B35]", box=box.SIMPLE)
                 detail_table.add_column("文件名", style="cyan")
-                detail_table.add_column("大小", style="bright_yellow")
+                detail_table.add_column("大小", style="bold #FF6B35")
                 detail_table.add_column("类型", style="magenta")
                 detail_table.add_column("修改时间", style="dim")
                 
@@ -437,7 +437,7 @@ def select_run_mode() -> str:
         mode_text.append(" - 完整流程（文档解析 + 知识库构建 + 问答）\n", style="white")
         mode_text.append("   适用: 首次运行或需要重新处理文档\n", style="dim")
         
-        mode_text.append("2. Build Mode", style="bold orange1")
+        mode_text.append("2. Build Mode", style="bold #FF6B35")
         mode_text.append(" - 仅构建模式（文档解析 + 知识库构建）\n", style="white")
         mode_text.append("   适用: 只需要构建知识库，不启动问答\n", style="dim")
         
@@ -448,7 +448,7 @@ def select_run_mode() -> str:
         panel = Panel(
             mode_text,
             title="选择运行模式",
-            border_style="orange1",
+            border_style="#FF6B35",
             box=box.ROUNDED,
             padding=(1, 2)
         )
@@ -1691,7 +1691,7 @@ class AgenticXGraphRAGDemo:
             panel = Panel(
                 qa_text,
                 title="智能问答",
-                border_style="orange1",
+                border_style="#FF6B35",
                 box=box.ROUNDED,
                 padding=(1, 2)
             )
