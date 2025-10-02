@@ -208,3 +208,4 @@ __marimo__/
 workspace/
 **.db
 custom_schema.json
+.DS_Store
