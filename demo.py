@@ -289,9 +289,9 @@ def print_help():
         
         table.add_row("/help", "显示帮助信息")
         table.add_row("/clear", "清屏")
-        table.add_row("/mode", "选择运行模式")
+        table.add_row("/mode", "选择运行模式并初始化系统")
         table.add_row("/data", "选择文档路径")
-        table.add_row("/rebuild", "重新构建知识库")
+        table.add_row("/rebuild", "立即重新构建知识库")
         table.add_row("/exit", "退出程序")
         table.add_row("", "")
         table.add_row("[dim]直接输入[/dim]", "[dim]输入问题开始智能问答[/dim]")
@@ -303,9 +303,9 @@ def print_help():
             "可用命令:\n\n"
             "/help     显示帮助信息\n"
             "/clear    清屏\n"
-            "/mode     选择运行模式\n"
+            "/mode     选择运行模式并初始化系统\n"
             "/data     选择文档路径\n"
-            "/rebuild  重新构建知识库\n"
+            "/rebuild  立即重新构建知识库\n"
             "/exit     退出程序\n\n"
             "直接输入问题开始智能问答"
         )
@@ -323,9 +323,9 @@ def print_help():
 
 /help     显示帮助信息
 /clear    清屏
-/mode     选择运行模式
+/mode     选择运行模式并初始化系统
 /data     选择文档路径
-/rebuild  重新构建知识库
+/rebuild  立即重新构建知识库
 /exit     退出程序
 
 直接输入问题开始智能问答
@@ -853,6 +853,7 @@ class AgenticXGraphRAGDemo:
         if not hasattr(self, '_document_vector_storage') or not self._document_vector_storage:
             from agenticx.storage.vectordb_storages.milvus import MilvusStorage
             storage_config = self.config['storage']['vector']['milvus']
+            self.logger.info(f"🔧 检索器初始化: mode={self.mode}, 文档向量存储recreate_if_exists=False")
             self._document_vector_storage = MilvusStorage(
                 dimension=1024,  # 使用嵌入维度
                 host=storage_config['host'],
@@ -890,6 +891,7 @@ class AgenticXGraphRAGDemo:
             storage_config = self.config['storage']['vector']['milvus']
             # 根据运行模式决定是否重新创建图向量集合
             recreate_graph_collection = self.mode in ["full", "build"]
+            self.logger.info(f"🔧 图向量存储配置: mode={self.mode}, recreate_if_exists={recreate_graph_collection}")
             self._graph_vector_storage = MilvusStorage(
                 dimension=1024,  # 使用嵌入维度
                 host=storage_config['host'],
@@ -1265,6 +1267,9 @@ class AgenticXGraphRAGDemo:
         
         # 🔧 为文档向量创建独立的Milvus存储实例
         storage_config = self.config['storage']['vector']['milvus']
+        # 🔧 修复：根据运行模式决定是否重新创建文档向量集合
+        recreate_document_collection = self.mode in ["full", "build"]
+        self.logger.info(f"🔧 文档向量存储配置: mode={self.mode}, recreate_if_exists={recreate_document_collection}")
         self._document_vector_storage = MilvusStorage(
             dimension=1024,  # 使用嵌入维度
             host=storage_config['host'],
@@ -1273,7 +1278,7 @@ class AgenticXGraphRAGDemo:
             database=storage_config.get('database', 'default'),
             username=storage_config.get('username'),
             password=storage_config.get('password'),
-            recreate_if_exists=True  # 重新创建集合，确保干净的开始
+            recreate_if_exists=recreate_document_collection  # 🔧 修复：根据模式决定是否重新创建
         )
         
         self.logger.info(f"📄 文档向量存储集合: {storage_config['collection_name']}")
@@ -1735,12 +1740,64 @@ class AgenticXGraphRAGDemo:
                 print_error(f"查询处理出错: {e}")
     
     async def _process_query(self, query: str) -> None:
-        """处理用户查询"""
+        """处理用户查询 - 增强版本，支持智能查询处理和多级回退"""
         print(f"\n🔄 正在处理查询: {query}")
         self.logger.info(f"开始处理查询: {query}")
         
         try:
-            # 🔧 修复：正确获取RAG和检索配置
+            # 🚀 新增：使用增强检索器
+            if not hasattr(self, '_enhanced_retriever'):
+                # 延迟导入增强检索器
+                try:
+                    from enhanced_retriever import EnhancedRetriever
+                    self._enhanced_retriever = EnhancedRetriever(
+                        base_retriever=self.retriever,
+                        graph_retriever=getattr(self, 'graph_retriever', None),
+                        storage_manager=self.storage_manager
+                    )
+                    self.logger.info("✅ 增强检索器初始化成功")
+                except ImportError as e:
+                    self.logger.warning(f"增强检索器导入失败，使用原始检索: {e}")
+                    self._enhanced_retriever = None
+            
+            # 使用增强检索器进行多级回退检索
+            if self._enhanced_retriever:
+                results, retrieval_report = await self._enhanced_retriever.retrieve_with_fallback(query)
+                
+                # 显示检索报告
+                if retrieval_report.get('success', False):
+                    print(f"✅ 检索成功！使用策略: {retrieval_report.get('strategy_used', 'unknown')}")
+                    print(f"📊 找到 {retrieval_report.get('total_results', 0)} 条相关信息")
+                    
+                    # 显示处理后的查询信息
+                    processed_query = retrieval_report.get('processed_query')
+                    if processed_query:
+                        self.logger.info(f"🔍 查询分析: 类型={processed_query.query_type}, 置信度={processed_query.confidence:.2f}")
+                        self.logger.info(f"🔍 关键词: {processed_query.keywords}")
+                        self.logger.info(f"🔍 实体: {processed_query.entities}")
+                    
+                    # 生成答案
+                    await self._generate_answer(query, results)
+                    return
+                else:
+                    print("❌ 增强检索也未找到结果")
+                    
+                    # 🚀 新增：运行诊断检查
+                    print("\n🔍 正在运行系统诊断...")
+                    await self._run_quick_diagnostics()
+                    
+                    # 提供查询建议
+                    suggestions = await self._enhanced_retriever.suggest_related_queries(query)
+                    if suggestions:
+                        print("\n💡 您可以尝试以下相关查询:")
+                        for i, suggestion in enumerate(suggestions, 1):
+                            print(f"   {i}. {suggestion}")
+                    return
+            
+            # 🔧 回退到原始检索逻辑（保持向后兼容）
+            self.logger.info("使用原始检索逻辑")
+            
+            # 获取配置
             rag_config = self.config.get('rag', {})
             rag_retrieval_config = rag_config.get('retrieval', {})
             retrieval_config = self.config.get('retrieval', {})
@@ -1754,35 +1811,53 @@ class AgenticXGraphRAGDemo:
             self.logger.info(f"  vector_config top_k: {vector_config.get('top_k', 'NOT_FOUND')}")
             self.logger.info(f"  graph_config max_nodes: {graph_config.get('max_nodes', 'NOT_FOUND')}")
             
-            # 使用RAG配置中的default_top_k，如果没有则使用向量配置的top_k
-            hybrid_top_k = rag_retrieval_config.get('default_top_k', vector_config.get('top_k', 20))
-            graph_top_k = graph_config.get('max_nodes', 50)  # 使用图配置中的max_nodes作为top_k
-            similarity_threshold = vector_config.get('similarity_threshold', 0.2)
-            # 🔧 修复：使用配置文件中的图检索阈值，而不是硬编码计算
-            graph_similarity_threshold = graph_config.get('similarity_threshold', 0.3)  # 从配置读取图检索阈值
+            # 🔧 优化：降低阈值，增加召回率
+            hybrid_top_k = rag_retrieval_config.get('default_top_k', vector_config.get('top_k', 200))
+            graph_top_k = graph_config.get('max_nodes', 100)
+            # 🚀 新增：动态调整阈值
+            similarity_threshold = max(0.1, vector_config.get('similarity_threshold', 0.2) * 0.5)  # 降低50%
+            graph_similarity_threshold = max(0.05, graph_config.get('similarity_threshold', 0.1) * 0.5)  # 降低50%
 
-            self.logger.info(f"🎯 最终检索参数: hybrid_top_k={hybrid_top_k}, graph_top_k={graph_top_k}, vector_threshold={similarity_threshold}, graph_threshold={graph_similarity_threshold}")
+            self.logger.info(f"🎯 优化后检索参数: hybrid_top_k={hybrid_top_k}, graph_top_k={graph_top_k}, vector_threshold={similarity_threshold}, graph_threshold={graph_similarity_threshold}")
             
+            # 🚀 新增：智能查询预处理
+            processed_queries = [query]
+            try:
+                from query_processor import ChineseQueryProcessor
+                processor = ChineseQueryProcessor()
+                processed_query = processor.process_query(query)
+                additional_queries = processor.generate_search_queries(processed_query)
+                processed_queries.extend(additional_queries)
+                self.logger.info(f"🔍 生成搜索查询: {processed_queries}")
+            except ImportError:
+                self.logger.warning("查询处理器不可用，使用原始查询")
 
-            # 1. 执行混合检索 - 🔧 修复：传递相似度阈值
-            self.logger.info(f"🔍 开始混合检索，请求top_k={hybrid_top_k}, min_score={similarity_threshold}")
-            hybrid_results = await self.retriever.retrieve(query, top_k=hybrid_top_k, min_score=similarity_threshold)
-            self.logger.info(f"🔍 混合检索实际返回: {len(hybrid_results)}条")
+            # 对每个处理后的查询执行检索
+            all_hybrid_results = []
+            all_graph_results = []
             
-            # 2. 执行图检索 - 🔧 修复：使用配置的top_k和更低的相似度阈值
-            graph_results = []
-            if hasattr(self, 'graph_retriever') and self.graph_retriever:
+            for search_query in processed_queries[:3]:  # 限制最多3个查询避免过度检索
+                # 1. 执行混合检索
+                self.logger.info(f"🔍 开始混合检索: '{search_query}', top_k={hybrid_top_k}, min_score={similarity_threshold}")
                 try:
-                    self.logger.info(f"🔗 开始图检索，请求top_k={graph_top_k}, min_score={graph_similarity_threshold}")
-                    graph_results = await self.graph_retriever.retrieve(query, top_k=graph_top_k, min_score=graph_similarity_threshold)
-                    self.logger.info(f"🔗 图检索实际返回: {len(graph_results)}条")
+                    hybrid_results = await self.retriever.retrieve(search_query, top_k=hybrid_top_k, min_score=similarity_threshold)
+                    all_hybrid_results.extend(hybrid_results)
+                    self.logger.info(f"🔍 混合检索 '{search_query}' 返回: {len(hybrid_results)}条")
                 except Exception as e:
-                    self.logger.warning(f"图检索失败: {e}")
-            else:
-                self.logger.warning("🔗 图检索器不可用")
+                    self.logger.warning(f"混合检索失败: {e}")
+                
+                # 2. 执行图检索
+                if hasattr(self, 'graph_retriever') and self.graph_retriever:
+                    try:
+                        self.logger.info(f"🔗 开始图检索: '{search_query}', top_k={graph_top_k}, min_score={graph_similarity_threshold}")
+                        graph_results = await self.graph_retriever.retrieve(search_query, top_k=graph_top_k, min_score=graph_similarity_threshold)
+                        all_graph_results.extend(graph_results)
+                        self.logger.info(f"🔗 图检索 '{search_query}' 返回: {len(graph_results)}条")
+                    except Exception as e:
+                        self.logger.warning(f"图检索失败: {e}")
             
             # 3. 合并和去重
-            all_results = hybrid_results + graph_results
+            all_results = all_hybrid_results + all_graph_results
             seen_ids = set()
             unique_results = []
             for result in all_results:
@@ -1807,16 +1882,22 @@ class AgenticXGraphRAGDemo:
                 type_counts[result_type] = type_counts.get(result_type, 0) + 1
             
             # 6. 优化后的统一日志输出
-            self.logger.info(f"完成执行混合检索 (top_k={hybrid_top_k}，阈值={similarity_threshold})")
+            self.logger.info(f"完成执行多查询检索，总查询数: {len(processed_queries)}")
             
             if not results:
                 print("❌ 没有找到相关信息")
                 self.logger.warning("检索无结果，尝试直接实体搜索")
                 await self._search_entity_directly(query)
+                
+                # 🚀 新增：提供查询建议
+                print("\n💡 您可以尝试:")
+                print("   1. 使用更具体的关键词")
+                print("   2. 检查拼写是否正确")
+                print("   3. 尝试相关的同义词")
                 return
             
             # 统一的检索统计信息
-            stats_info = f"检索统计:\n🔍 混合检索: {len(hybrid_results)}条\n🔗 图检索: {len(graph_results)}条\n🔄 去重后: {len(unique_results)}条\n✅ 最终采用: {len(results)}条，其中："
+            stats_info = f"检索统计:\n🔍 混合检索: {len(all_hybrid_results)}条\n🔗 图检索: {len(all_graph_results)}条\n🔄 去重后: {len(unique_results)}条\n✅ 最终采用: {len(results)}条，其中："
             for result_type, count in type_counts.items():
                 stats_info += f"\n    {result_type}: {count}条"
             
@@ -1828,6 +1909,97 @@ class AgenticXGraphRAGDemo:
         except Exception as e:
             self.logger.error(f"查询处理错误: {e}")
             print(f"❌ 查询处理出错: {e}")
+            
+            # 🚀 新增：错误时的友好提示
+            print("\n💡 遇到问题时，您可以:")
+            print("   1. 简化查询内容")
+            print("   2. 使用中文关键词")
+            print("   3. 检查网络连接")
+            print("   4. 稍后重试")
+    
+    async def _run_quick_diagnostics(self) -> None:
+        """运行快速诊断检查"""
+        try:
+            print("📊 系统状态检查:")
+            
+            # 检查文档数量
+            doc_count = len(self.documents) if hasattr(self, 'documents') and self.documents else 0
+            print(f"  📄 已加载文档: {doc_count} 个")
+            
+            # 检查BM25索引
+            if hasattr(self, 'retriever') and hasattr(self.retriever, 'bm25_retriever'):
+                bm25_retriever = self.retriever.bm25_retriever
+                if hasattr(bm25_retriever, '_documents'):
+                    bm25_doc_count = len(bm25_retriever._documents)
+                    index_terms = len(bm25_retriever._inverted_index) if hasattr(bm25_retriever, '_inverted_index') else 0
+                    print(f"  🔍 BM25索引: {bm25_doc_count} 个文档, {index_terms} 个词汇")
+                else:
+                    print(f"  🔍 BM25索引: 未初始化")
+            
+            # 检查图数据
+            if hasattr(self, 'storage_manager'):
+                try:
+                    from agenticx.storage import StorageType
+                    graph_storage = self.storage_manager.get_storage(StorageType.NEO4J)
+                    if graph_storage:
+                        # 检查实体数量
+                        entity_result = graph_storage.execute_query("MATCH (n:Entity) RETURN count(n) as count")
+                        entity_count = entity_result[0]['count'] if entity_result else 0
+                        
+                        # 检查所有节点数量
+                        node_result = graph_storage.execute_query("MATCH (n) RETURN count(n) as count")
+                        node_count = node_result[0]['count'] if node_result else 0
+                        
+                        print(f"  🔗 知识图谱: {entity_count} 个实体, {node_count} 个总节点")
+                        
+                        # 🚀 新增：检查是否有包含常见词汇的节点
+                        common_terms = ['中国', '技术', '系统', '公司', '服务']
+                        found_terms = []
+                        for term in common_terms:
+                            try:
+                                result = graph_storage.execute_query(
+                                    "MATCH (n) WHERE toString(n.name) CONTAINS $term OR toString(n.content) CONTAINS $term RETURN count(n) as count",
+                                    {"term": term}
+                                )
+                                if result and result[0]['count'] > 0:
+                                    found_terms.append(f"{term}({result[0]['count']})")
+                            except:
+                                continue
+                        
+                        if found_terms:
+                            print(f"  📝 常见词汇: {', '.join(found_terms)}")
+                        else:
+                            print(f"  ⚠️  未找到常见中文词汇，可能存在索引问题")
+                    else:
+                        print(f"  🔗 知识图谱: 连接失败")
+                except Exception as e:
+                    print(f"  🔗 知识图谱: 检查失败 - {e}")
+            
+            # 🚀 新增：测试简单查询
+            print("\n🧪 测试基础查询:")
+            test_queries = ['测试', '中国', '技术']
+            for test_query in test_queries:
+                try:
+                    if hasattr(self, 'retriever'):
+                        results = await self.retriever.retrieve(test_query, top_k=1, min_score=0.0)
+                        print(f"  '{test_query}': {len(results)} 条结果")
+                    else:
+                        print(f"  '{test_query}': 检索器不可用")
+                except Exception as e:
+                    print(f"  '{test_query}': 查询失败 - {str(e)[:50]}...")
+            
+            print("\n💡 诊断建议:")
+            if doc_count == 0:
+                print("  ⚠️  没有加载文档，请先运行构建模式")
+            elif hasattr(self, 'retriever') and hasattr(self.retriever, 'bm25_retriever'):
+                bm25_doc_count = len(getattr(self.retriever.bm25_retriever, '_documents', {}))
+                if bm25_doc_count == 0:
+                    print("  ⚠️  BM25索引为空，请检查索引构建过程")
+                else:
+                    print("  ✅ 系统组件正常，可能是查询词汇不在知识库中")
+            
+        except Exception as e:
+            print(f"  ❌ 诊断过程出错: {e}")
     
     async def _search_entity_directly(self, query: str) -> None:
         """直接在Neo4j中搜索实体"""
@@ -1872,125 +2044,214 @@ class AgenticXGraphRAGDemo:
         try:
             self.logger.info(f"开始生成答案，输入{len(results)}条检索结果")
             
+            # 🔧 调试：详细检查输入结果
+            if results:
+                for i, result in enumerate(results[:3]):  # 只检查前3个结果
+                    self.logger.info(f"结果{i+1}: type={type(result)}, content长度={len(getattr(result, 'content', ''))}, metadata={getattr(result, 'metadata', {})}")
+            else:
+                self.logger.warning("输入结果为空！")
+                print("⚠️ 传入的检索结果为空")
+                return
+            
             # 获取上下文配置
             rag_config = self.config.get('rag', {})
             retrieval_config = rag_config.get('retrieval', {})
             context_top_k = retrieval_config.get('default_top_k', 10)
             
-            # 分类检索结果
-            graph_results = [r for r in results if r.metadata and r.metadata.get('search_source') == 'graph_vector']
-            doc_results = [r for r in results if r.metadata and (
-                r.metadata.get('type') in ['document_chunk', 'bm25_chunk'] or 
-                'document_id' in r.metadata or
-                'document_title' in r.metadata
-            )]
-            other_results = [r for r in results if r not in graph_results and r not in doc_results]
+            # 🔧 修复：更宽松的结果分类，确保所有结果都能被处理
+            graph_results = []
+            doc_results = []
+            entity_results = []
+            other_results = []
             
-            # 构建平衡的上下文
+            for r in results:
+                if not r.metadata:
+                    # 没有metadata的结果归类为其他结果
+                    other_results.append(r)
+                    continue
+                
+                search_source = r.metadata.get('search_source', '')
+                result_type = r.metadata.get('type', '')
+                
+                # 图检索结果
+                if (search_source in ['graph_vector', 'graph', 'direct_entity', 'full_text'] or 
+                    result_type in ['entity', 'relationship', 'triple', 'community']):
+                    if result_type == 'entity' or search_source == 'direct_entity':
+                        entity_results.append(r)
+                    else:
+                        graph_results.append(r)
+                # 文档结果
+                elif (result_type in ['document_chunk', 'bm25_chunk', 'vector_chunk'] or 
+                      'document_id' in r.metadata or 
+                      'document_title' in r.metadata or
+                      search_source in ['vector', 'bm25', 'hybrid']):
+                    doc_results.append(r)
+                else:
+                    other_results.append(r)
+            
+            # 🔧 调试：打印结果分类信息
+            self.logger.info(f"结果分类: 图检索={len(graph_results)}, 文档={len(doc_results)}, 实体={len(entity_results)}, 其他={len(other_results)}")
+            
+            # 合并图检索和实体结果
+            graph_results.extend(entity_results)
+            
+            # 🔧 修复：确保所有结果都能被使用，优先使用所有可用结果
             context_results = []
-            doc_count = min(len(doc_results), context_top_k // 2)
-            graph_count = min(len(graph_results), context_top_k - doc_count)
             
-            context_results.extend(doc_results[:doc_count])
-            context_results.extend(graph_results[:graph_count])
+            # 如果有文档结果，优先使用文档结果
+            if doc_results:
+                doc_count = min(len(doc_results), max(context_top_k // 2, 3))  # 至少保留3个文档结果
+                context_results.extend(doc_results[:doc_count])
+            
+            # 添加图检索和实体结果
+            if graph_results:
+                remaining_slots = context_top_k - len(context_results)
+                graph_count = min(len(graph_results), max(remaining_slots, 2))  # 至少保留2个图结果
+                context_results.extend(graph_results[:graph_count])
             
             # 添加其他结果
-            remaining = context_top_k - len(context_results)
-            if remaining > 0:
-                context_results.extend(other_results[:remaining])
+            if other_results:
+                remaining_slots = context_top_k - len(context_results)
+                if remaining_slots > 0:
+                    context_results.extend(other_results[:remaining_slots])
             
-            # 🔧 重新设计上下文格式，参考youtu-graphrag的结构化格式
+            # 🔧 如果分类后没有结果，直接使用所有原始结果
+            if not context_results and results:
+                self.logger.warning("分类后无结果，直接使用所有原始结果")
+                context_results = results[:context_top_k]
+            
+            # 🔧 重新设计上下文格式，支持所有类型的结果
             context_sections = []
             
-            # === 图检索结果 ===
-            if graph_results:
-                context_sections.append("=== 知识图谱信息 ===")
-                
-                # 分类图检索结果
-                entities = []
-                relations = []
-                triples = []
-                communities = []
-                other_graph = []
-                
-                for result in graph_results[:graph_count]:
-                    if not result.content.strip():
-                        continue
-                        
-                    vector_type = result.metadata.get('vector_type', 'unknown') if result.metadata else 'unknown'
-                    score = getattr(result, 'score', 0.0)
-                    content = result.content.strip()
-                    
-                    # 根据类型分类，保持原始内容完整性
-                    if vector_type == 'node' or 'Entity:' in content:
-                        entities.append(f"• {content} [相关度: {score:.3f}]")
-                    elif vector_type == 'relation' or 'Relationship:' in content:
-                        relations.append(f"• {content} [相关度: {score:.3f}]")
-                    elif vector_type == 'triple':
-                        triples.append(f"• {content} [相关度: {score:.3f}]")
-                    elif vector_type == 'community':
-                        communities.append(f"• {content} [相关度: {score:.3f}]")
-                    else:
-                        # 其他类型的图检索结果
-                        other_graph.append(f"• {content} [相关度: {score:.3f}]")
-                
-                # 按类型添加结果，保持结构化展示
-                if entities:
-                    context_sections.append("实体信息:")
-                    context_sections.extend(entities)
-                if relations:
-                    context_sections.append("\n关系信息:")
-                    context_sections.extend(relations)
-                if triples:
-                    context_sections.append("\n三元组信息:")
-                    context_sections.extend(triples)
-                if communities:
-                    context_sections.append("\n社区信息:")
-                    context_sections.extend(communities)
-                if other_graph:
-                    context_sections.append("\n其他图谱信息:")
-                    context_sections.extend(other_graph)
+            # 🔧 调试：记录实际使用的结果数量
+            self.logger.info(f"构建上下文: 使用{len(context_results)}条结果")
             
-            # === 文档检索结果 ===
-            if doc_results:
+            # === 处理所有结果，按来源分组 ===
+            entity_info = []
+            document_info = []
+            graph_info = []
+            other_info = []
+            
+            for i, result in enumerate(context_results):
+                 try:
+                     # 🔧 增强：更强的属性访问容错
+                     content = ""
+                     if hasattr(result, 'content'):
+                         content = str(result.content).strip()
+                     elif isinstance(result, dict):
+                         content = str(result.get('content', '')).strip()
+                     
+                     if not content:
+                         self.logger.warning(f"结果{i+1}内容为空，跳过")
+                         continue
+                     
+                     # 获取分数
+                     score = 0.0
+                     if hasattr(result, 'score'):
+                         score = float(result.score)
+                     elif isinstance(result, dict):
+                         score = float(result.get('score', 0.0))
+                     
+                     # 获取metadata
+                     metadata = {}
+                     if hasattr(result, 'metadata'):
+                         metadata = result.metadata or {}
+                     elif isinstance(result, dict):
+                         metadata = result.get('metadata', {})
+                     
+                     # 构建来源信息
+                     source_info = ""
+                     search_source = metadata.get('search_source', '')
+                     result_type = metadata.get('type', '')
+                     
+                     if search_source:
+                         source_info = f"[{search_source}]"
+                     elif result_type:
+                         source_info = f"[{result_type}]"
+                     
+                     # 🔧 调试：记录处理的结果
+                     self.logger.info(f"处理结果{i+1}: content={content[:50]}..., score={score}, source={search_source}, type={result_type}")
+                     
+                     # 分类结果
+                     if result_type == 'entity' or search_source == 'direct_entity':
+                         entity_info.append(f"• {content} {source_info} [相关度: {score:.3f}]")
+                     elif (result_type in ['document_chunk', 'bm25_chunk', 'vector_chunk'] or 
+                           'document_title' in metadata or 
+                           search_source in ['vector', 'bm25', 'hybrid']):
+                         # 提取文档信息
+                         doc_title = metadata.get('document_title', '')
+                         if doc_title:
+                             source_info = f"[{doc_title}]"
+                         document_info.append(f"• {content} {source_info} [相关度: {score:.3f}]")
+                     elif (search_source in ['graph_vector', 'graph', 'full_text'] or 
+                           result_type in ['relationship', 'triple', 'community']):
+                         graph_info.append(f"• {content} {source_info} [相关度: {score:.3f}]")
+                     else:
+                         # 🔧 修复：确保所有结果都被包含
+                         other_info.append(f"• {content} {source_info} [相关度: {score:.3f}]")
+                 
+                 except Exception as e:
+                     self.logger.error(f"处理结果{i+1}时出错: {e}")
+                     # 🔧 容错：即使出错也尝试提取基本信息
+                     try:
+                         content = str(result)[:200] if result else "无内容"
+                         other_info.append(f"• {content} [处理出错]")
+                     except:
+                         pass
+            
+            # 按优先级添加到上下文
+            if entity_info:
+                context_sections.append("=== 实体信息 ===")
+                context_sections.extend(entity_info)
+            
+            if document_info:
                 if context_sections:
                     context_sections.append("\n=== 文档内容 ===")
                 else:
                     context_sections.append("=== 文档内容 ===")
-                
-                for i, result in enumerate(doc_results[:doc_count]):
-                    if result.content.strip():
+                context_sections.extend(document_info)
+            
+            if graph_info:
+                if context_sections:
+                    context_sections.append("\n=== 知识图谱信息 ===")
+                else:
+                    context_sections.append("=== 知识图谱信息 ===")
+                context_sections.extend(graph_info)
+            
+            if other_info:
+                if context_sections:
+                    context_sections.append("\n=== 其他相关信息 ===")
+                else:
+                    context_sections.append("=== 其他相关信息 ===")
+                context_sections.extend(other_info)
+            
+            # 🔧 最终安全网：如果所有分类都为空，直接显示原始结果
+            if not entity_info and not document_info and not graph_info and not other_info:
+                self.logger.warning("所有分类都为空，使用原始结果")
+                context_sections.append("=== 检索结果 ===")
+                for i, result in enumerate(context_results):
+                    try:
+                        content = str(getattr(result, 'content', result))[:500]
                         score = getattr(result, 'score', 0.0)
-                        
-                        # 提取文档元信息
-                        doc_info = ""
-                        if result.metadata:
-                            # 提取页码信息
-                            if 'page' in result.metadata:
-                                doc_info = f"Page {result.metadata['page']}"
-                            # 提取文档标题或来源
-                            elif 'document_title' in result.metadata:
-                                doc_info = f"{result.metadata['document_title']}"
-                            elif 'source' in result.metadata:
-                                doc_info = f"{result.metadata['source']}"
-                        
-                        # 从内容中提取页码信息（如果metadata中没有）
-                        if not doc_info and "--- Page" in result.content:
-                            import re
-                            page_match = re.search(r'--- Page (\d+) ---', result.content)
-                            if page_match:
-                                doc_info = f"Page {page_match.group(1)}"
-                        
-                        # 保持文档内容完整性，只做基本格式清理
-                        content = result.content.strip()
-                        # 规范化页码分隔符格式
-                        content = content.replace('--- Page', '\n--- Page')
-                        
-                        # 构建文档条目
-                        doc_prefix = f"{doc_info}: " if doc_info else ""
-                        context_sections.append(f"{doc_prefix}{content} [相关度: {score:.3f}]")
+                        context_sections.append(f"• 结果{i+1}: {content} [相关度: {score:.3f}]")
+                    except:
+                        context_sections.append(f"• 结果{i+1}: {str(result)[:200]}")
             
             context = "\n".join(context_sections)
+            
+            # 🔧 调试：检查最终上下文
+            self.logger.info(f"最终上下文长度: {len(context)}字符")
+            if len(context) < 50:
+                self.logger.warning(f"上下文过短: '{context}'")
+                # 如果上下文太短，强制添加一些内容
+                if context_results:
+                    context = "=== 检索到的信息 ===\n"
+                    for i, result in enumerate(context_results[:3]):
+                        try:
+                            content = str(getattr(result, 'content', result))
+                            context += f"结果{i+1}: {content}\n"
+                        except:
+                            context += f"结果{i+1}: {str(result)}\n"
             
             # 使用提示词管理器加载模板
             try:
@@ -2243,6 +2504,9 @@ async def interactive_mode():
     # 显示欢迎界面
     print_welcome()
     
+    # 🔧 修复：启动时直接显示帮助信息
+    print_help()
+    
     # 初始化配置
     data_path = None
     run_mode = None
@@ -2276,6 +2540,42 @@ async def interactive_mode():
                 elif command == '/mode':
                     run_mode = select_run_mode()
                     print_success(f"已选择运行模式: {run_mode}")
+                    
+                    # 🔧 修复：选择模式后立即进行完整的初始化流程
+                    try:
+                        # 1. 选择数据目录
+                        print_mode_selection("请选择数据目录")
+                        data_path = display_data_selection()
+                        print_success(f"已选择数据目录: {data_path}")
+                        
+                        # 2. 初始化系统
+                        print_action("正在初始化 GraphRAG 系统...")
+                        demo_instance = AgenticXGraphRAGDemo(config_path="configs.yml", mode=run_mode)
+                        demo_instance.data_dir = Path(data_path)  # 设置数据目录
+                        
+                        # 3. 根据模式执行相应的操作
+                        if run_mode in ['full', 'build']:
+                            print_action("正在构建知识库...")
+                            await demo_instance.run_build_only()
+                            print_success("知识库构建完成！")
+                            
+                            if run_mode == 'build':
+                                print_info("构建模式完成，可以使用 /mode 切换到问答模式")
+                                continue
+                            else:  # full模式
+                                print_success("系统已准备就绪，可以开始问答！")
+                        
+                        elif run_mode == 'qa':
+                            print_action("正在加载已有知识库...")
+                            await demo_instance.initialize_components()
+                            await demo_instance._validate_existing_data()
+                            print_success("系统已准备就绪，可以开始问答！")
+                        
+                    except Exception as e:
+                        print_error(f"初始化失败: {e}")
+                        demo_instance = None
+                        run_mode = None
+                        data_path = None
                 
                 elif command == '/data':
                     data_path = display_data_selection()
@@ -2289,8 +2589,29 @@ async def interactive_mode():
                         rebuild = rebuild_input in ['y', 'yes']
                     
                     if rebuild:
-                        print_info("将在下次运行时重新构建知识库")
-                        # 这里可以添加删除现有索引的逻辑
+                        try:
+                            # 🔧 修复：立即执行重建操作
+                            print_mode_selection("请选择数据目录")
+                            data_path = display_data_selection()
+                            print_success(f"已选择数据目录: {data_path}")
+                            
+                            print_action("正在重新构建知识库...")
+                            # 创建build模式的demo实例
+                            rebuild_demo = AgenticXGraphRAGDemo(config_path="configs.yml", mode="build")
+                            rebuild_demo.data_dir = Path(data_path)
+                            
+                            # 执行重建
+                            await rebuild_demo.run_build_only()
+                            print_success("知识库重建完成！")
+                            
+                            # 如果当前有运行的实例，重置它
+                            if demo_instance:
+                                print_info("重置当前系统实例，请重新使用 /mode 选择运行模式")
+                                demo_instance = None
+                                run_mode = None
+                                
+                        except Exception as e:
+                            print_error(f"重建失败: {e}")
                     else:
                         print_info("取消重新构建")
                 
@@ -2303,80 +2624,18 @@ async def interactive_mode():
                     print_info("输入 /help 查看可用命令")
             
             else:
-                # 处理问答
+                # 🔧 修复：简化问答处理逻辑
                 if not demo_instance:
-                    # 如果还没有初始化，先进行配置
-                    if not data_path:
-                        print_mode_selection("请先选择数据目录")
-                        data_path = display_data_selection()
-                    
-                    if not run_mode:
-                        print_mode_selection("请先选择运行模式")
-                        run_mode = select_run_mode()
-                    
-                    # 初始化 demo 实例
-                    print_action("正在初始化 GraphRAG 系统...")
-                    demo_instance = AgenticXGraphRAGDemo(config_path="configs.yml", mode=run_mode)
-                    
-                    if run_mode in ['full', 'build']:
-                        print_action("正在构建知识库...")
-                        await demo_instance.run_build_only()
-                        print_success("知识库构建完成！")
-                        
-                        if run_mode == 'build':
-                            print_info("构建模式完成，输入 /mode 切换到问答模式")
-                            continue
-                    
-                    elif run_mode == 'qa':
-                        print_action("正在加载已有知识库...")
-                        await demo_instance.run_qa_only()
+                    print_error("系统尚未初始化，请先使用 /mode 选择运行模式")
+                    continue
                 
-                # 执行单次问答
-                if demo_instance and hasattr(demo_instance, 'retrieval_agent'):
-                    print_thinking(f"正在思考您的问题: {user_input}")
-                    
-                    start_time = time.time()
-                    
-                    # 显示进度条（如果有 Rich）
-                    if console and Progress:
-                        with Progress(
-                            "[progress.description]{task.description}",
-                            "[progress.percentage]{task.percentage:>3.0f}%",
-                            console=console,
-                            transient=True
-                        ) as progress:
-                            task = progress.add_task("正在查询...", total=100)
-                            progress.update(task, advance=30)
-                            
-                            # 使用 retrieval_agent 进行查询
-                            result = await demo_instance.retrieval_agent.aquery(user_input)
-                            progress.update(task, advance=70)
-                    else:
-                        result = await demo_instance.retrieval_agent.aquery(user_input)
-                    
-                    end_time = time.time()
-                    
-                    # 显示结果
-                    if console and Panel and box:
-                        response_text = Text()
-                        response_text.append(f"💡 回答 (耗时: {end_time - start_time:.2f}秒)\n\n", style="bold green")
-                        response_text.append(str(result), style="white")
-                        
-                        response_panel = Panel(
-                            response_text,
-                            title="查询结果",
-                            border_style="green",
-                            box=box.ROUNDED,
-                            padding=(1, 2)
-                        )
-                        console.print(response_panel)
-                    else:
-                        print(f"\n💡 回答 (耗时: {end_time - start_time:.2f}秒):")
-                        print("-" * 50)
-                        print(str(result))
-                        print("-" * 50)
-                else:
-                    print_error("系统尚未初始化，请先选择运行模式")
+                # 执行问答
+                try:
+                    print_thinking(f"正在处理您的问题: {user_input}")
+                    await demo_instance._process_query(user_input)
+                except Exception as e:
+                    print_error(f"问答处理失败: {e}")
+                    logger.error(f"Query processing error: {e}", exc_info=True)
         
         except KeyboardInterrupt:
             print_success("\n感谢使用 AgenticX GraphRAG 系统！")
