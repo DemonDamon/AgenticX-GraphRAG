@@ -1,0 +1,163 @@
+# 查询分解提示词模板
+# 基于youtu-graphrag的先进思想，支持中英文查询分解
+
+chinese_decomposition: |
+  你是一个专业的问题分解大师，擅长将复杂问题分解为简单的子问题。
+  请根据以下问题和图本体模式，将问题分解为{decomposition_count}个子问题。
+
+  核心要求：
+  1. 每个子问题必须：
+     - 明确且专注于一个事实或关系
+     - 能够独立回答，不依赖其他子问题的结果
+     - 明确引用原始问题中的实体和关系
+     - 设计为检索最终答案所需的相关知识
+
+  2. 分解策略：
+     - 对于简单问题（1-2跳推理），返回原始问题作为单个子问题
+     - 对于复杂问题，按照逻辑推理链分解
+     - 优先分解实体识别、关系查询、属性获取等基础问题
+
+  3. 返回格式：
+     请返回一个JSON对象，包含以下字段：
+     - sub_questions: 子问题列表，每个包含question、confidence、reasoning_type、entities、relations
+     - decomposition_confidence: 分解置信度(0-1)
+     - reasoning_complexity: 推理复杂度("simple", "medium", "complex")
+     - involved_types: 涉及的节点类型、关系类型、属性类型
+
+  原始问题：{query}
+
+  图本体模式：
+  {schema}
+
+  示例输出：
+  {{
+      "sub_questions": [
+          {{
+              "question": "什么是智取生辰纲事件？",
+              "confidence": 0.9,
+              "reasoning_type": "factual",
+              "entities": ["智取生辰纲"],
+              "relations": ["定义", "描述"]
+          }},
+          {{
+              "question": "智取生辰纲事件中的主要人物有哪些？",
+              "confidence": 0.8,
+              "reasoning_type": "relational",
+              "entities": ["智取生辰纲", "人物"],
+              "relations": ["参与", "涉及"]
+          }}
+      ],
+      "decomposition_confidence": 0.85,
+      "reasoning_complexity": "medium",
+      "involved_types": {{
+          "nodes": ["EVENT", "PERSON"],
+          "relations": ["PARTICIPATES_IN", "INVOLVES"],
+          "attributes": ["name", "role"]
+      }}
+  }}
+
+english_decomposition: |
+  You are a professional question decomposition expert specializing in multi-hop reasoning.
+  Given the following schema and question, decompose the complex question into {decomposition_count} focused sub-questions.
+
+  CRITICAL REQUIREMENTS:
+  1. Each sub-question must be:
+     - Specific and focused on a single fact or relationship
+     - Answerable independently with the given schema
+     - Explicitly reference entities and relations from the original question
+     - Designed to retrieve relevant knowledge for the final answer
+
+  2. Decomposition Strategy:
+     - For simple questions (1-2 hop), return the original question as a single sub-question
+     - For complex questions, decompose along logical reasoning chains
+     - Prioritize entity identification, relationship queries, and attribute retrieval
+
+  3. Return Format:
+     Return a JSON object with the following fields:
+     - sub_questions: List of sub-questions with question, confidence, reasoning_type, entities, relations
+     - decomposition_confidence: Confidence in decomposition (0-1)
+     - reasoning_complexity: Reasoning complexity ("simple", "medium", "complex")
+     - involved_types: Involved node types, relation types, attribute types
+
+  Original Question: {query}
+
+  Graph Schema:
+  {schema}
+
+  Example Output:
+  {{
+      "sub_questions": [
+          {{
+              "question": "Who is the director of Ethnic Notions?",
+              "confidence": 0.9,
+              "reasoning_type": "factual",
+              "entities": ["Ethnic Notions"],
+              "relations": ["directed_by"]
+          }},
+          {{
+              "question": "When did the director of Ethnic Notions die?",
+              "confidence": 0.8,
+              "reasoning_type": "temporal",
+              "entities": ["director", "Ethnic Notions"],
+              "relations": ["death_date", "directed_by"]
+          }}
+      ],
+      "decomposition_confidence": 0.85,
+      "reasoning_complexity": "medium",
+      "involved_types": {{
+          "nodes": ["FILM", "PERSON"],
+          "relations": ["DIRECTED_BY", "DEATH_DATE"],
+          "attributes": ["name", "date"]
+      }}
+  }}
+
+# 复杂查询分解示例
+complex_query_examples:
+  chinese:
+    - original: "中国铁塔的PMS系统和运维监控系统有什么区别，哪个更适合应急处理？"
+      sub_questions:
+        - "中国铁塔的PMS系统是什么？"
+        - "中国铁塔的运维监控系统是什么？"
+        - "PMS系统和运维监控系统的主要功能区别是什么？"
+        - "哪个系统更适合应急处理？"
+    
+    - original: "智取生辰纲事件中，晁盖和吴用的策略为什么能够成功？"
+      sub_questions:
+        - "智取生辰纲事件中晁盖的策略是什么？"
+        - "智取生辰纲事件中吴用的策略是什么？"
+        - "这些策略成功的关键因素有哪些？"
+
+  english:
+    - original: "Which film has the director died earlier, Ethnic Notions or Gordon Of Ghost City?"
+      sub_questions:
+        - "Who is the director of Ethnic Notions?"
+        - "Who is the director of Gordon Of Ghost City?"
+        - "When did the director of Ethnic Notions die?"
+        - "When did the director of Gordon Of Ghost City die?"
+
+# 简单查询示例（无需分解）
+simple_query_examples:
+  chinese:
+    - "什么是中国铁塔？"
+    - "PMS系统的定义是什么？"
+    - "晁盖是谁？"
+  
+  english:
+    - "What is the capital of France?"
+    - "Who is the director of Titanic?"
+    - "What is machine learning?"
+
+# 推理类型定义
+reasoning_types:
+  factual: "事实性查询，寻求基本信息和定义"
+  relational: "关系性查询，探索实体间的关系"
+  comparative: "比较性查询，对比多个实体或概念"
+  temporal: "时间性查询，涉及时间顺序或时间点"
+  causal: "因果性查询，探索原因和结果"
+  aggregative: "聚合性查询，需要统计或汇总信息"
+
+# 复杂度级别定义
+complexity_levels:
+  simple: "简单查询，1-2跳推理，直接回答"
+  medium: "中等复杂度，2-3跳推理，需要中间步骤"
+  complex: "复杂查询，3+跳推理，需要多步分解"

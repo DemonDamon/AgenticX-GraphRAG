@@ -2218,7 +2218,7 @@ class AgenticXGraphRAGDemo:
                          source_info = f"[{result_type}]"
                      
                      # 🔧 调试：记录处理的结果
-                     self.logger.info(f"处理结果{i+1}: content={content[:50]}..., score={score}, source={search_source}, type={result_type}")
+                    #  self.logger.info(f"处理结果{i+1}: content={content[:50]}..., score={score}, source={search_source}, type={result_type}")
                      
                      # 分类结果
                      if result_type == 'entity' or search_source == 'direct_entity':
