@@ -50,47 +50,47 @@ class EnhancedRetriever:
         self.storage_manager = storage_manager
         self.query_processor = ChineseQueryProcessor()
         
-        # 定义多级检索策略 - 🚀 优化：更激进的阈值设置
+        # 定义多级检索策略 - 🚀 调整为用户期望的阈值：文档>0.2，图谱>0.1
         self.strategies = [
             RetrievalStrategy(
                 name="strict",
-                vector_threshold=0.7,
-                graph_threshold=0.6,
-                bm25_min_score=0.5,
-                top_k=20,
+                vector_threshold=0.5,   # 🔧 严格模式保持较高阈值
+                graph_threshold=0.4,    # 🔧 严格图检索阈值
+                bm25_min_score=0.25,    # 🔧 严格BM25阈值
+                top_k=30,               # 🔧 适中返回数量
                 description="严格模式 - 高质量结果"
             ),
             RetrievalStrategy(
                 name="standard",
-                vector_threshold=0.4,
-                graph_threshold=0.3,
-                bm25_min_score=0.2,
-                top_k=50,
+                vector_threshold=0.3,   # 🔧 标准模式适中阈值
+                graph_threshold=0.2,    # 🔧 标准图检索阈值
+                bm25_min_score=0.15,    # 🔧 标准BM25阈值
+                top_k=60,               # 🔧 增加返回数量
                 description="标准模式 - 平衡质量和召回"
             ),
             RetrievalStrategy(
                 name="relaxed",
-                vector_threshold=0.2,
-                graph_threshold=0.1,
-                bm25_min_score=0.05,
-                top_k=100,
+                vector_threshold=0.2,   # 🔧 用户期望：文档相似度>0.2
+                graph_threshold=0.1,    # 🔧 用户期望：知识图谱>0.1
+                bm25_min_score=0.08,    # 🔧 适中的BM25阈值
+                top_k=100,              # 🔧 增加返回数量
                 description="宽松模式 - 高召回率"
             ),
             RetrievalStrategy(
                 name="fuzzy",
-                vector_threshold=0.15,  # 🔧 修复：提高模糊模式阈值，避免过多无关结果
-                graph_threshold=0.05,   # 🔧 修复：提高图检索阈值
-                bm25_min_score=0.1,     # 🔧 修复：添加BM25最低分数要求
-                top_k=100,              # 🔧 修复：降低最大返回数量
+                vector_threshold=0.15,  # 🔧 模糊模式稍低阈值
+                graph_threshold=0.08,   # 🔧 模糊图检索阈值
+                bm25_min_score=0.04,    # 🔧 模糊BM25分数
+                top_k=150,              # 🔧 较多返回数量
                 description="模糊模式 - 最大召回"
             ),
             RetrievalStrategy(
                 name="aggressive",
-                vector_threshold=0.0,
-                graph_threshold=0.0,
-                bm25_min_score=0.0,
-                top_k=500,
-                description="激进模式 - 无阈值限制"
+                vector_threshold=0.1,   # 🔧 激进模式低阈值，兜底策略
+                graph_threshold=0.05,   # 🔧 激进图阈值
+                bm25_min_score=0.02,    # 🔧 激进BM25阈值
+                top_k=200,              # 🔧 最多返回数量
+                description="激进模式 - 兜底策略"
             )
         ]
         
@@ -159,12 +159,16 @@ class EnhancedRetriever:
                 
                 # 对每个搜索查询执行检索
                 strategy_results = []
-                for search_query in search_queries:
+                for idx, search_query in enumerate(search_queries):
                     results = await self._execute_strategy(search_query, strategy)
+                    logger.debug(f"查询{idx+1}[{search_query[:30]}...] 返回 {len(results)} 条结果")
                     strategy_results.extend(results)
+                
+                logger.info(f"策略 {strategy.name} 总计获得 {len(strategy_results)} 条原始结果")
                 
                 # 去重和排序
                 unique_results = self._deduplicate_results(strategy_results)
+                logger.info(f"去重后剩余 {len(unique_results)} 条结果")
                 
                 if unique_results:
                     all_results = unique_results
@@ -209,21 +213,32 @@ class EnhancedRetriever:
 
     def _select_start_strategy(self, processed_query: ProcessedQuery) -> int:
         """根据查询特征选择起始策略"""
-        # 高置信度查询从严格模式开始
-        if processed_query.confidence > 0.8 and len(processed_query.entities) > 0:
+        # 🔧 优化：对特定查询类型使用更宽松的策略
+        complex_query_types = ['specific_inquiry', 'commitment_inquiry', 'enumeration', 'classification', 'service_inquiry']
+        
+        # 复杂查询类型直接从宽松模式开始，提高召回率
+        if processed_query.query_type in complex_query_types:
+            return 2  # relaxed
+        
+        # 长查询（通常包含更多上下文）从宽松模式开始
+        if len(processed_query.original) > 20:
+            return 2  # relaxed
+        
+        # 包含多个关键词的查询从标准模式开始
+        if len(processed_query.keywords) >= 3:
+            return 1  # standard
+        
+        # 高置信度且有明确实体的简单查询从严格模式开始
+        if processed_query.confidence > 0.8 and len(processed_query.entities) > 0 and len(processed_query.original) < 15:
             return 0  # strict
         
         # 中等置信度从标准模式开始
         elif processed_query.confidence > 0.6:
             return 1  # standard
         
-        # 低置信度或短查询从宽松模式开始
-        elif processed_query.confidence > 0.4 or len(processed_query.original) > 5:
-            return 2  # relaxed
-        
-        # 极低置信度直接使用模糊模式
+        # 其他情况从宽松模式开始，确保更好的召回率
         else:
-            return 3  # fuzzy
+            return 2  # relaxed
 
     async def _execute_strategy(self, query: str, strategy: RetrievalStrategy) -> List[RetrievalResult]:
         """执行特定策略的检索"""
@@ -237,7 +252,17 @@ class EnhancedRetriever:
                     top_k=strategy.top_k,
                     min_score=strategy.vector_threshold
                 )
-                results.extend(hybrid_results)
+                # 🔧 修复：对向量检索结果应用向量阈值过滤
+                filtered_hybrid = [
+                    r for r in hybrid_results 
+                    if r.score >= strategy.vector_threshold
+                ]
+                # 标记结果来源
+                for result in filtered_hybrid:
+                    if not hasattr(result, 'metadata') or result.metadata is None:
+                        result.metadata = {}
+                    result.metadata['source_type'] = 'vector'
+                results.extend(filtered_hybrid)
             
             # 2. 图检索
             if self.graph_retriever:
@@ -247,17 +272,39 @@ class EnhancedRetriever:
                         top_k=strategy.top_k // 2,
                         min_score=strategy.graph_threshold
                     )
-                    results.extend(graph_results)
+                    # 🔧 修复：对图检索结果应用图阈值过滤
+                    filtered_graph = [
+                        r for r in graph_results 
+                        if r.score >= strategy.graph_threshold
+                    ]
+                    # 标记结果来源
+                    for result in filtered_graph:
+                        if not hasattr(result, 'metadata') or result.metadata is None:
+                            result.metadata = {}
+                        result.metadata['source_type'] = 'graph'
+                    results.extend(filtered_graph)
                 except Exception as e:
                     logger.warning(f"图检索失败: {e}")
             
-            # 3. 过滤低分结果
-            filtered_results = [
-                r for r in results 
-                if r.score >= strategy.bm25_min_score
-            ]
+            # 3. 🔧 修复：根据结果来源应用不同的最终过滤标准
+            final_filtered = []
+            for r in results:
+                source_type = r.metadata.get('source_type', 'unknown') if hasattr(r, 'metadata') and r.metadata else 'unknown'
+                
+                if source_type == 'graph':
+                    # 图检索结果：使用图阈值
+                    if r.score >= strategy.graph_threshold:
+                        final_filtered.append(r)
+                elif source_type == 'vector':
+                    # 向量检索结果：使用向量阈值
+                    if r.score >= strategy.vector_threshold:
+                        final_filtered.append(r)
+                else:
+                    # 未知来源：使用BM25阈值作为兜底
+                    if r.score >= strategy.bm25_min_score:
+                        final_filtered.append(r)
             
-            return filtered_results
+            return final_filtered
             
         except Exception as e:
             logger.error(f"策略执行失败: {e}")
@@ -471,24 +518,73 @@ class EnhancedRetriever:
         return fallback_results
 
     def _deduplicate_results(self, results: List[RetrievalResult]) -> List[RetrievalResult]:
-        """去重和排序结果"""
+        """去重和排序结果 - 🚀 优化版本：减少过度去重"""
         if not results:
             return []
         
-        # 基于内容去重
-        seen_content = set()
+        logger.debug(f"开始去重，原始结果数: {len(results)}")
+        
+        # 🔧 优化：更宽松的去重策略
+        seen_chunk_ids = set()
         unique_results = []
+        duplicate_count = 0
         
         for result in results:
-            content_key = result.content.strip().lower()[:100]  # 使用前100字符作为去重键
-            if content_key not in seen_content:
-                seen_content.add(content_key)
+            is_duplicate = False
+            
+            # 策略1: 基于chunk_id去重（最严格，完全相同的块）
+            if hasattr(result, 'chunk_id') and result.chunk_id:
+                if result.chunk_id in seen_chunk_ids:
+                    duplicate_count += 1
+                    is_duplicate = True
+                else:
+                    seen_chunk_ids.add(result.chunk_id)
+            
+            # 策略2: 只对非常相似的内容进行去重（提高阈值到0.95）
+            if not is_duplicate:
+                for existing in unique_results[-3:]:  # 🔧 减少检查范围，只检查最近3个
+                    if self._is_content_similar(result.content, existing.content, threshold=0.95):
+                        duplicate_count += 1
+                        is_duplicate = True
+                        break
+            
+            if not is_duplicate:
                 unique_results.append(result)
+        
+        logger.debug(f"去重完成: 保留 {len(unique_results)} 条，去除 {duplicate_count} 条重复")
         
         # 按分数排序
         unique_results.sort(key=lambda x: x.score, reverse=True)
         
         return unique_results
+    
+    def _is_content_similar(self, content1: str, content2: str, threshold: float = 0.95) -> bool:
+        """检查两个内容是否相似 - 🚀 优化：更严格的相似度判断"""
+        # 🔧 改进：使用更精确的相似度计算
+        
+        # 如果内容长度差异很大，不太可能是重复
+        len1, len2 = len(content1), len(content2)
+        if abs(len1 - len2) / max(len1, len2) > 0.3:  # 长度差异超过30%
+            return False
+        
+        # 计算词汇重叠度（Jaccard相似度）
+        words1 = set(content1.lower().split())
+        words2 = set(content2.lower().split())
+        
+        if not words1 or not words2:
+            return False
+        
+        intersection = len(words1.intersection(words2))
+        union = len(words1.union(words2))
+        
+        jaccard_similarity = intersection / union if union > 0 else 0
+        
+        # 🔧 额外检查：如果内容开头和结尾都很相似，可能是重复
+        start_similar = content1[:100].lower() == content2[:100].lower()
+        end_similar = content1[-100:].lower() == content2[-100:].lower()
+        
+        # 只有在Jaccard相似度很高，或者开头结尾都相同时才认为是重复
+        return jaccard_similarity > threshold or (start_similar and end_similar and jaccard_similarity > 0.8)
 
     def get_stats(self) -> Dict[str, Any]:
         """获取检索统计信息"""

@@ -2059,8 +2059,8 @@ class AgenticXGraphRAGDemo:
             context_top_k = retrieval_config.get('default_top_k', 10)
             max_context_length = retrieval_config.get('max_context_length', 4000)
             
-            # 🔧 修复：添加单个内容片段的最大长度限制
-            max_content_per_item = 500  # 每个检索结果最多保留500字符
+            # 🔧 修复：完全移除内容截断限制，保留完整信息
+            # max_content_per_item = None  # 不再限制单个内容片段长度
             
             # 🔧 修复：更宽松的结果分类，确保所有结果都能被处理
             graph_results = []
@@ -2103,60 +2103,33 @@ class AgenticXGraphRAGDemo:
             # 首先对所有结果按相关度排序
             all_sorted_results = sorted(results, key=lambda x: getattr(x, 'score', 0), reverse=True)
             
-            # 🔧 修复：平衡选择不同类型的内容，确保多样性
-            context_results = []
+            # 🔧 优化：简化选择策略，优先保证信息完整性而非类型平衡
+            # 直接按相关度选择最佳结果，不限制类型数量
+            context_results = all_sorted_results[:context_top_k]
             
-            # 按相关度选择最佳结果，但保持类型平衡
-            doc_selected = 0
-            graph_selected = 0
-            entity_selected = 0
-            other_selected = 0
+            # 🔧 记录选择的结果类型分布（仅用于调试）
+            type_distribution = {}
+            for result in context_results:
+                if result.metadata:
+                    result_type = result.metadata.get('type', 'unknown')
+                    search_source = result.metadata.get('search_source', 'unknown')
+                    key = f"{result_type}_{search_source}"
+                    type_distribution[key] = type_distribution.get(key, 0) + 1
             
-            max_per_type = max(2, context_top_k // 4)  # 每种类型最多选择的数量
+            self.logger.info(f"选择结果类型分布: {type_distribution}")
             
-            for result in all_sorted_results:
-                if len(context_results) >= context_top_k:
-                    break
-                
-                if not result.metadata:
-                    if other_selected < max_per_type:
-                        context_results.append(result)
-                        other_selected += 1
-                    continue
-                
-                search_source = result.metadata.get('search_source', '')
-                result_type = result.metadata.get('type', '')
-                
-                # 优先选择高质量的实体结果
-                if (result_type == 'entity' or search_source == 'direct_entity') and entity_selected < max_per_type:
-                    context_results.append(result)
-                    entity_selected += 1
-                # 然后选择文档结果
-                elif (result_type in ['document_chunk', 'bm25_chunk', 'vector_chunk'] or 
-                      'document_id' in result.metadata or 
-                      'document_title' in result.metadata or
-                      search_source in ['vector', 'bm25', 'hybrid']) and doc_selected < max_per_type:
-                    context_results.append(result)
-                    doc_selected += 1
-                # 最后选择图检索结果
-                elif (search_source in ['graph_vector', 'graph', 'full_text'] or 
-                      result_type in ['relationship', 'triple', 'community']) and graph_selected < max_per_type:
-                    context_results.append(result)
-                    graph_selected += 1
-                # 其他结果
-                elif other_selected < max_per_type:
-                    context_results.append(result)
-                    other_selected += 1
-            
-            # 🔧 如果还有空位，按相关度填充剩余位置
-            if len(context_results) < context_top_k:
-                remaining_slots = context_top_k - len(context_results)
-                selected_ids = {id(r) for r in context_results}
-                for result in all_sorted_results:
-                    if len(context_results) >= context_top_k:
-                        break
-                    if id(result) not in selected_ids:
-                        context_results.append(result)
+            # 🔧 备选方案：如果需要保持一定的类型多样性，可以使用以下逻辑
+            # 但优先使用上面的简单策略，避免人为限制导致信息缺失
+            # context_results = []
+            # selected_ids = set()
+            # 
+            # # 第一轮：选择高分结果，不限制类型
+            # for result in all_sorted_results:
+            #     if len(context_results) >= context_top_k:
+            #         break
+            #     if id(result) not in selected_ids:
+            #         context_results.append(result)
+            #         selected_ids.add(id(result))
             
             # 🔧 如果分类后没有结果，直接使用所有原始结果
             if not context_results and results:
@@ -2188,10 +2161,8 @@ class AgenticXGraphRAGDemo:
                          self.logger.warning(f"结果{i+1}内容为空，跳过")
                          continue
                      
-                     # 🔧 修复：截断过长的内容
-                     if len(content) > max_content_per_item:
-                         content = content[:max_content_per_item] + "..."
-                         self.logger.debug(f"结果{i+1}内容被截断到{max_content_per_item}字符")
+                     # 🔧 修复：保留完整内容，不进行截断
+                     # 完全保留原始内容，不做任何截断处理
                      
                      # 获取分数
                      score = 0.0
@@ -2220,23 +2191,32 @@ class AgenticXGraphRAGDemo:
                      # 🔧 调试：记录处理的结果
                     #  self.logger.info(f"处理结果{i+1}: content={content[:50]}..., score={score}, source={search_source}, type={result_type}")
                      
-                     # 分类结果
+                     # 🔧 优化：增加更详细的来源信息，帮助AI识别信息来源
+                     # 构建详细的来源标识
+                     detailed_source = source_info
+                     doc_title = metadata.get('document_title', '')
+                     chunk_id = metadata.get('chunk_id', '')
+                     
+                     if doc_title:
+                         detailed_source = f"[文档: {doc_title}]"
+                         if chunk_id:
+                             detailed_source += f"[片段: {chunk_id}]"
+                     elif chunk_id:
+                         detailed_source = f"[片段: {chunk_id}]"
+                     
+                     # 分类结果，但保持来源清晰
                      if result_type == 'entity' or search_source == 'direct_entity':
-                         entity_info.append(f"• {content} {source_info} [相关度: {score:.3f}]")
+                         entity_info.append(f"• {content} {detailed_source} [相关度: {score:.3f}]")
                      elif (result_type in ['document_chunk', 'bm25_chunk', 'vector_chunk'] or 
                            'document_title' in metadata or 
                            search_source in ['vector', 'bm25', 'hybrid']):
-                         # 提取文档信息
-                         doc_title = metadata.get('document_title', '')
-                         if doc_title:
-                             source_info = f"[{doc_title}]"
-                         document_info.append(f"• {content} {source_info} [相关度: {score:.3f}]")
+                         document_info.append(f"• {content} {detailed_source} [相关度: {score:.3f}]")
                      elif (search_source in ['graph_vector', 'graph', 'full_text'] or 
                            result_type in ['relationship', 'triple', 'community']):
-                         graph_info.append(f"• {content} {source_info} [相关度: {score:.3f}]")
+                         graph_info.append(f"• {content} {detailed_source} [相关度: {score:.3f}]")
                      else:
                          # 🔧 修复：确保所有结果都被包含
-                         other_info.append(f"• {content} {source_info} [相关度: {score:.3f}]")
+                         other_info.append(f"• {content} {detailed_source} [相关度: {score:.3f}]")
                  
                  except Exception as e:
                      self.logger.error(f"处理结果{i+1}时出错: {e}")
@@ -2247,64 +2227,64 @@ class AgenticXGraphRAGDemo:
                      except:
                          pass
             
-            # 按优先级添加到上下文
+            # 🔧 优化：简化分类，统一展示所有相关信息，避免人为分级
+            # 将所有信息合并，按相关度排序，保持原始结构
+            all_info = []
+            
+            # 收集所有信息，但不强制分类
             if entity_info:
-                context_sections.append("=== 实体信息 ===")
-                context_sections.extend(entity_info)
-            
+                all_info.extend(entity_info)
             if document_info:
-                if context_sections:
-                    context_sections.append("\n=== 文档内容 ===")
-                else:
-                    context_sections.append("=== 文档内容 ===")
-                context_sections.extend(document_info)
-            
+                all_info.extend(document_info)
             if graph_info:
-                if context_sections:
-                    context_sections.append("\n=== 知识图谱信息 ===")
-                else:
-                    context_sections.append("=== 知识图谱信息 ===")
-                context_sections.extend(graph_info)
-            
+                all_info.extend(graph_info)
             if other_info:
-                if context_sections:
-                    context_sections.append("\n=== 其他相关信息 ===")
-                else:
-                    context_sections.append("=== 其他相关信息 ===")
-                context_sections.extend(other_info)
+                all_info.extend(other_info)
             
-            # 🔧 最终安全网：如果所有分类都为空，直接显示原始结果
+            # 统一展示，避免分类标题可能造成的信息层级误解
+            if all_info:
+                context_sections.append("=== 相关信息 ===")
+                context_sections.append("⚠️ 重要提醒：以下信息来自不同文档片段，请严格按照每个片段的具体描述回答，不要混合或推测信息。")
+                context_sections.extend(all_info)
+            
+            # 🔧 备选方案：如果需要保持一定分类，使用更中性的标题
+            # 但优先使用上面的统一展示方式，避免人为分级
+            # if document_info or entity_info or graph_info:
+            #     context_sections.append("=== 检索到的相关信息 ===")
+            #     context_sections.extend(document_info + entity_info + graph_info)
+            # if other_info:
+            #     context_sections.extend(other_info)
+            
+            # 🔧 最终安全网：如果所有分类都为空，直接显示原始结果（完整内容）
             if not entity_info and not document_info and not graph_info and not other_info:
                 self.logger.warning("所有分类都为空，使用原始结果")
                 context_sections.append("=== 检索结果 ===")
                 for i, result in enumerate(context_results):
                     try:
-                        content = str(getattr(result, 'content', result))[:500]
+                        content = str(getattr(result, 'content', result))  # 保留完整内容
                         score = getattr(result, 'score', 0.0)
                         context_sections.append(f"• 结果{i+1}: {content} [相关度: {score:.3f}]")
                     except:
-                        context_sections.append(f"• 结果{i+1}: {str(result)[:200]}")
+                        context_sections.append(f"• 结果{i+1}: {str(result)}")  # 保留完整内容
             
             context = "\n".join(context_sections)
             
-            # 🔧 修复：添加最终上下文长度检查和截断
-            if len(context) > max_context_length:
-                self.logger.warning(f"上下文长度{len(context)}超过限制{max_context_length}，进行截断")
-                context = context[:max_context_length] + "\n\n[注：内容因长度限制被截断]"
+            # 🔧 修复：完全保留上下文，不进行任何截断
+            # 记录上下文长度但不截断
+            self.logger.info(f"最终上下文长度: {len(context)}字符 (原限制: {max_context_length}，现已移除限制)")
             
-            # 🔧 调试：检查最终上下文
-            self.logger.info(f"最终上下文长度: {len(context)}字符 (限制: {max_context_length})")
+            # 🔧 调试：检查最终上下文（仅记录，不做截断处理）
             if len(context) < 50:
                 self.logger.warning(f"上下文过短: '{context}'")
-                # 如果上下文太短，强制添加一些内容
+                # 如果上下文太短，强制添加一些内容，但不截断
                 if context_results:
                     context = "=== 检索到的信息 ===\n"
                     for i, result in enumerate(context_results[:3]):
                         try:
-                            content = str(getattr(result, 'content', result))[:300]  # 限制每个结果300字符
+                            content = str(getattr(result, 'content', result))  # 保留完整内容
                             context += f"结果{i+1}: {content}\n"
                         except:
-                            context += f"结果{i+1}: {str(result)[:200]}\n"
+                            context += f"结果{i+1}: {str(result)}\n"
             
             # 使用提示词管理器加载模板
             try:

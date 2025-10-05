@@ -34,10 +34,10 @@ llm:
   model: "qwen3-235b-a22b"  # 原始：qwen3-next-80b-a3b-instruct
   api_key: "${BAILIAN_API_KEY}"
   base_url: "${BAILIAN_BASE_URL}"
-  temperature: 0.1
-  max_tokens: 2048
-  timeout: 360
-  retry_attempts: 5
+  temperature: 0.2    # 🔧 改进：稍微提高温度，增加多样性
+  max_tokens: 4096    # 🔧 改进：增加输出长度
+  timeout: 480        # 🔧 改进：增加超时时间
+  retry_attempts: 3   # 🔧 改进：减少重试次数
   
   # 强模型配置（用于文档分析和Schema生成）
   strong_model:
@@ -108,10 +108,10 @@ knowledge:
     # 知识图谱专用分块配置 - 用于知识图谱构建
     graph_knowledge:
       strategy: "fixed_size"  # 固定大小分块，稳定可靠
-      chunk_size: 3000       # 适中大小，平衡上下文和处理效率
-      chunk_overlap: 300     # 10%重叠，保持连续性
-      min_chunk_size: 1500   # 确保足够的上下文
-      max_chunk_size: 5000   # 避免过长影响抽取质量
+      chunk_size: 2000       # 🔧 改进：减小分块大小，提高信息密度
+      chunk_overlap: 400     # 🔧 改进：增加重叠，保持更好的连续性
+      min_chunk_size: 1000   # 🔧 改进：降低最小大小
+      max_chunk_size: 3000   # 🔧 改进：降低最大大小
     
     # 向量检索专用分块配置 - 用于语义检索
     vector:
@@ -136,11 +136,11 @@ knowledge:
     schema_path: "schema.json"  # 基础Schema文件路径
     enable_custom_schema: true  # 启用定制Schema生成
     prompts_dir: "prompts"  # 提示词文件夹路径
-    spo_batch_size: 40  # 使用单个处理避免网络连接问题
+    spo_batch_size: 20  # 使用单个处理避免网络连接问题
     
     # 实体提取配置
     entity_extraction:
-      max_entities_per_chunk: 40  # 增加每块最大实体数
+      max_entities_per_chunk: 60  # 🔧 改进：大幅增加每块最大实体数
       entity_types:
         - "PERSON"
         - "ORGANIZATION"
@@ -152,12 +152,19 @@ knowledge:
         - "METHOD"      # 新增：方法/算法
         - "FRAMEWORK"   # 新增：框架
         - "COMPONENT"   # 新增：组件
-      confidence_threshold: 0.6  # 降低阈值，提取更多实体
+        - "SYSTEM"      # 🔧 新增：系统
+        - "SERVICE"     # 🔧 新增：服务
+        - "TOOL"        # 🔧 新增：工具
+        - "DATA"        # 🔧 新增：数据
+        - "PROCESS"     # 🔧 新增：过程
+      confidence_threshold: 0.3  # 🔧 改进：大幅降低阈值，提取更多实体
+      default_confidence: 0.8     # 🔧 新增：默认置信度配置
+      dynamic_confidence: true    # 🔧 新增：启用动态置信度计算
       enable_coreference_resolution: true
       
     # 关系提取配置
     relationship_extraction:
-      max_relationships_per_chunk: 60  # 增加每块最大关系数
+      max_relationships_per_chunk: 100  # 🔧 改进：大幅增加每块最大关系数
       relationship_types:
         - "RELATED_TO"
         - "PART_OF"
@@ -169,7 +176,14 @@ knowledge:
         - "IMPLEMENTS"  # 新增：实现关系
         - "USES"        # 新增：使用关系
         - "CONTAINS"    # 新增：包含关系
-      confidence_threshold: 0.5  # 降低阈值，提取更多关系
+        - "MANAGES"     # 🔧 新增：管理关系
+        - "OPERATES"    # 🔧 新增：操作关系
+        - "PROVIDES"    # 🔧 新增：提供关系
+        - "SUPPORTS"    # 🔧 新增：支持关系
+        - "ENABLES"     # 🔧 新增：启用关系
+      confidence_threshold: 0.2  # 🔧 改进：大幅降低阈值，提取更多关系
+      default_confidence: 0.8     # 🔧 新增：默认置信度配置
+      dynamic_confidence: true    # 🔧 新增：启用动态置信度计算
       enable_bidirectional: true
       
     # 社区检测配置
@@ -374,7 +388,7 @@ rag:
   # 检索配置
   retrieval:
     default_top_k: 100         # 🔧 修复：大幅降低默认检索数量，控制上下文长度
-    max_context_length: 32000  # 🔧 修复：降低最大上下文长度，避免token超限
+    max_context_length: 1000000  # 🔧 修复：设置为极大值，实际上移除上下文长度限制
     enable_context_compression: true
     compression_ratio: 0.8    # 🔧 修复：提高压缩比例，减少冗余内容
     

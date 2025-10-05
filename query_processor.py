@@ -5,6 +5,11 @@
 """
 
 import re
+import warnings
+# 过滤 pkg_resources 弃用警告
+warnings.filterwarnings("ignore", category=DeprecationWarning, module=".*pkg_resources.*")
+warnings.filterwarnings("ignore", message=".*pkg_resources.*")
+
 import jieba
 from typing import List, Dict, Any, Set, Optional
 from dataclasses import dataclass
@@ -31,7 +36,7 @@ class ChineseQueryProcessor:
         # 初始化jieba分词
         jieba.initialize()
         
-        # 常见的查询模式
+        # 常见的查询模式 - 🔧 增强版本，更好识别复杂查询
         self.question_patterns = {
             r'(.+?)是什么': 'definition',
             r'(.+?)是啥': 'definition', 
@@ -40,6 +45,20 @@ class ChineseQueryProcessor:
             r'(.+?)如何': 'method',
             r'(.+?)的作用': 'function',
             r'(.+?)的特点': 'feature',
+            # 🔧 增强：更全面的复杂查询模式
+            r'(.+?)包含(.+?)方面': 'specific_inquiry',
+            r'(.+?)具体包含(.+?)': 'specific_inquiry',
+            r'(.+?)有哪些(.+?)': 'enumeration',
+            r'(.+?)分为(.+?)': 'classification',
+            r'(.+?)承诺(.+?)': 'commitment_inquiry',
+            r'(.+?)哪几个(.+?)': 'enumeration',          # 🔧 新增：哪几个
+            r'(.+?)几个方面(.+?)': 'specific_inquiry',    # 🔧 新增：几个方面
+            r'(.+?)方面的(.+?)': 'specific_inquiry',      # 🔧 新增：方面的
+            r'(.+?)包括(.+?)': 'enumeration',            # 🔧 新增：包括
+            r'(.+?)涉及(.+?)': 'specific_inquiry',       # 🔧 新增：涉及
+            r'(.+?)覆盖(.+?)': 'specific_inquiry',       # 🔧 新增：覆盖
+            r'(.+?)服务(.+?)': 'service_inquiry',        # 🔧 新增：服务相关
+            r'(.+?)保障(.+?)': 'service_inquiry',        # 🔧 新增：保障相关
         }
         
         # 同义词词典
@@ -150,6 +169,12 @@ class ChineseQueryProcessor:
             return 'method', 0.7
         elif any(word in query for word in ['为什么', '原因']):
             return 'reason', 0.7
+        elif any(word in query for word in ['包含', '具体', '哪些', '哪几个']):
+            return 'specific_inquiry', 0.8  # 🔧 新增：具体询问类型
+        elif any(word in query for word in ['承诺', '保证', '确保']):
+            return 'commitment_inquiry', 0.8  # 🔧 新增：承诺询问类型
+        elif '？' in query or '?' in query:
+            return 'question', 0.6  # 🔧 新增：问号表示疑问
         else:
             return 'general', 0.5
 
@@ -164,7 +189,7 @@ class ChineseQueryProcessor:
             word = word.strip()
             if (len(word) > 1 and 
                 word not in self.stop_words and 
-                not re.match(r'^[？！。，、；：""''（）【】\s]+$', word)):
+                not re.match(r'^[？！。，、；：""''（）【】 \t\n\r\f\v]+$', word)):
                 keywords.append(word)
         
         return keywords
