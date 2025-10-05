@@ -929,11 +929,11 @@ graph TD
         B4[28 tokens/秒]
     end
     
-    subgraph "Qwen3-30B-A3B (问答生成)"
-        C1[平衡性能]
-        C2[实时响应]
-        C3[成本可控]
-        C4[指令优化]
+    subgraph "Qwen3-235B-A22B (问答生成)"
+        C1[高效推理]
+        C2[成本优化]
+        C3[MoE架构]
+        C4[22B激活参数]
     end
     
     A1 --> D[任务适配策略]
