@@ -440,11 +440,27 @@ graph TB
         W[动态阈值调整]
     end
     
-    subgraph "应用服务层"
-        X[智能问答系统]
-        Y[多跳数据集构建器]
-        Z[系统诊断工具]
-        AA[性能监控]
+    subgraph "应用层"
+        subgraph "系统协调层"
+            X1[AgenticXGraphRAGDemo<br/>生命周期管理]
+            X2[组件初始化编排器]
+            X3[配置管理器]
+            X4[运行模式控制器]
+        end
+        
+        subgraph "业务编排层"
+            Y1[文档处理编排器]
+            Y2[知识图谱构建编排器]
+            Y3[存储索引编排器]
+            Y4[检索问答编排器]
+        end
+        
+        subgraph "工具服务层"
+            Z1[多跳数据集构建器]
+            Z2[提示词管理器]
+            Z3[查询处理器]
+            Z4[系统诊断工具]
+        end
     end
     
     UI1 --> A
@@ -484,16 +500,31 @@ graph TB
     U --> V
     V --> W
     
-    W --> X
-    W --> Y
-    S --> Z
-    Z --> AA
+    W --> Y4
+    W --> Z1
+    S --> Z4
+    
+    X1 --> X2
+    X2 --> X3
+    X3 --> X4
+    
+    X2 --> Y1
+    Y1 --> Y2
+    Y2 --> Y3
+    Y3 --> Y4
+    
+    Y1 --> Z2
+    Y4 --> Z3
+    X1 --> Z4
     
     style E fill:#e1f5fe
     style K fill:#f3e5f5
     style M fill:#e8f5e8
     style S fill:#fff3e0
     style T fill:#ffebee
+    style X1 fill:#f0f4c3
+    style Y2 fill:#e8f5e8
+    style Z2 fill:#fce4ec
 ```
 
 ### 3.2 增强检索器架构（核心创新）
