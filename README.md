@@ -874,16 +874,128 @@ REDIS_PORT=6379
 
 ### 4.3 启动数据层服务
 
+#### 📋 Docker Compose 环境变量机制
+
+Docker Compose 按以下优先级读取环境变量：
+
+1. **命令行参数** (`--env-file` 指定的文件)
+2. **当前目录的 .env 文件** (运行 `docker-compose` 命令的目录)
+3. **系统环境变量**
+4. **docker-compose.yml 中的默认值**
+
+**文件结构说明**：
+```
+AgenticX-GraphRAG/
+├── .env                    # 主配置文件
+├── docker/
+│   ├── .env -> ../.env    # 符号链接指向主配置文件
+│   └── docker-compose.yml # Docker 服务定义
+```
+
+#### 🔧 环境变量配置说明
+
+**重要提示**：Docker Compose 需要在运行目录下找到 `.env` 文件才能正确读取环境变量。
+
 ```bash
 # 进入docker目录
 cd docker
 
+# 🔗 创建.env文件符号链接（如果不存在）
+# Docker Compose 会在当前目录查找.env文件
+ln -sf ../.env .env
+
+# 验证.env文件是否正确链接
+ls -la .env
+cat .env | grep NEO4J_PASSWORD
+```
+
+#### 🚀 启动服务
+
+```bash
 # 启动所有数据层服务
 docker-compose up -d
 
 # 检查服务状态
 docker-compose ps
+
+# 验证环境变量是否正确加载
+docker-compose config | grep NEO4J_AUTH
 ```
+
+#### 🔍 服务验证
+
+```bash
+# 检查各服务健康状态
+docker-compose ps
+
+# 查看服务日志（如有问题）
+docker-compose logs neo4j
+docker-compose logs milvus
+docker-compose logs redis
+```
+
+#### ⚠️ 常见问题排除
+
+**Neo4j 认证失败问题**：
+```bash
+# 问题现象：Neo.ClientError.Security.Unauthorized
+# 原因：Neo4j 数据库已用旧密码初始化，新密码不生效
+
+# 解决方案：重置 Neo4j 数据
+docker-compose down neo4j
+rm -rf data/neo4j
+docker-compose up -d neo4j
+
+# 等待服务启动完成
+sleep 15
+docker-compose ps neo4j
+```
+
+**环境变量读取问题**：
+```bash
+# 检查.env文件是否存在于docker目录
+ls -la docker/.env
+
+# 如果不存在，创建符号链接
+cd docker
+ln -sf ../.env .env
+
+# 验证配置是否正确
+docker-compose config | grep -E "(NEO4J|MILVUS|REDIS)"
+```
+
+**服务启动状态检查**：
+```bash
+# 查看所有服务状态
+docker-compose ps
+
+# 预期输出示例：
+# NAME             STATUS
+# agenticx-neo4j   Up (healthy)
+# agenticx-milvus  Up (healthy)  
+# agenticx-redis   Up (healthy)
+```
+
+#### 🧪 连接测试
+
+启动服务后，可以使用测试脚本验证连接：
+
+```bash
+# 返回项目根目录
+cd ..
+
+# 运行 Neo4j 连接测试
+python test_neo4j.py
+
+# 预期输出：
+# ✅ Neo4j连接成功
+# ✅ 总体结果: 1/2 项测试通过
+```
+
+**测试脚本功能**：
+- 🔌 测试 Neo4j 数据库连接
+- 🐳 检查 Docker 服务状态  
+- 📊 提供详细的故障排除建议
 
 ### 4.4 运行演示
 
@@ -1178,3 +1290,62 @@ await builder.build_dataset(
 **感谢使用 AgenticX GraphRAG 演示系统！**
 
 这个演示不仅展示了如何将传统的GraphRAG方法升级为更智能、更高效的两阶段抽取系统，更重要的是通过实际部署发现并解决了三路检索架构的关键问题。新增的多跳数据集构建器为GraphRAG系统的评估和测试提供了强大的工具支持。希望这些经验能为您的知识图谱项目提供参考和启发！
+
+
+# React + TypeScript + Vite
+
+This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+
+Currently, two official plugins are available:
+
+- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Babel](https://babeljs.io/) for Fast Refresh
+- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/) for Fast Refresh
+
+## Expanding the ESLint configuration
+
+If you are developing a production application, we recommend updating the configuration to enable type-aware lint rules:
+
+```js
+export default tseslint.config({
+  extends: [
+    // Remove ...tseslint.configs.recommended and replace with this
+    ...tseslint.configs.recommendedTypeChecked,
+    // Alternatively, use this for stricter rules
+    ...tseslint.configs.strictTypeChecked,
+    // Optionally, add this for stylistic rules
+    ...tseslint.configs.stylisticTypeChecked,
+  ],
+  languageOptions: {
+    // other options...
+    parserOptions: {
+      project: ['./tsconfig.node.json', './tsconfig.app.json'],
+      tsconfigRootDir: import.meta.dirname,
+    },
+  },
+})
+```
+
+You can also install [eslint-plugin-react-x](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-x) and [eslint-plugin-react-dom](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-dom) for React-specific lint rules:
+
+```js
+// eslint.config.js
+import reactX from 'eslint-plugin-react-x'
+import reactDom from 'eslint-plugin-react-dom'
+
+export default tseslint.config({
+  extends: [
+    // other configs...
+    // Enable lint rules for React
+    reactX.configs['recommended-typescript'],
+    // Enable lint rules for React DOM
+    reactDom.configs.recommended,
+  ],
+  languageOptions: {
+    // other options...
+    parserOptions: {
+      project: ['./tsconfig.node.json', './tsconfig.app.json'],
+      tsconfigRootDir: import.meta.dirname,
+    },
+  },
+})
+```
